@@ -5,24 +5,27 @@ on:
     branches: [main]
   pull_request:
 
+# Public repo on GitHub-hosted runners: nothing here runs on the owner's machine,
+# and the job's token can only read.
+permissions:
+  contents: read
+
 jobs:
   test:
-    runs-on: [self-hosted, linux, x64]
-    timeout-minutes: 30
-    env:
-      DSH_COPILOT: /home/mec/Projects/dsh-copilot
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
-      - name: Install (sandboxed, no install scripts)
+          node-version: 22
+      - name: Install (no install scripts)
         run: |
           [ -f package.json ] || exit 0
-          node "$DSH_COPILOT/sandbox.mjs" install --dir "$PWD"
-      - name: Test (sandboxed, no network)
+          npm ci --ignore-scripts
+      - name: Test
         run: |
           [ -f package.json ] || exit 0
-          node "$DSH_COPILOT/sandbox.mjs" run --dir "$PWD" -- npm test
+          npm test

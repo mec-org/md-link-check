@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 30
+    env:
+      DSH_COPILOT: /home/mec/Projects/dsh-copilot
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install (sandboxed, no install scripts)
+        run: |
+          [ -f package.json ] || exit 0
+          node "$DSH_COPILOT/sandbox.mjs" install --dir "$PWD"
+      - name: Test (sandboxed, no network)
+        run: |
+          [ -f package.json ] || exit 0
+          node "$DSH_COPILOT/sandbox.mjs" run --dir "$PWD" -- npm test

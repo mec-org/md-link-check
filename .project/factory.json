@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "transport": "dom",
+  "fallback": true,
+  "mode": "Think deeper",
+  "claims": "report",
+  "lanes": {
+    "max": 3
+  },
+  "budget": {
+    "askMs": 120000,
+    "maxPromptChars": 15000
+  },
+  "threadPerMilestone": true,
+  "limits": {
+    "maxMilestones": 15,
+    "maxHours": 48,
+    "maxAsksPerDay": null,
+    "maxRounds": 40,
+    "maxBlockedRounds": 3
+  },
+  "planner": {
+    "baseUrl": "https://openrouter.ai/api/v1",
+    "model": "google/gemini-4-argon",
+    "keyFile": "~/.config/dsh-copilot/openrouter.key",
+    "monthlyUsd": 10,
+    "usdPerPromptToken": 0.000002,
+    "usdPerCompletionToken": 0.00001
+  },
+  "sandbox": {
+    "allowScripts": []
+  },
+  "deps": {
+    "minAgeDays": 30,
+    "minWeeklyDownloads": 1000,
+    "allow": []
+  }
+}

@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import type { ExternalCheckOptions, FetchLike } from '../src/external.js';
 import type { JsonReport } from '../src/report.js';
 import { run, type CliIo } from '../src/run.js';
 import { makeTempRoot, writeFiles } from './helpers.js';
@@ -46,7 +47,7 @@ interface CapturedRun {
 /** Runs the CLI engine in-process with injectable external options. */
 async function captureRun(
   args: readonly string[],
-  external: { timeoutMs?: number } = {},
+  external: ExternalCheckOptions = {},
 ): Promise<CapturedRun> {
   let stdout = '';
   let stderr = '';
@@ -513,5 +514,87 @@ describe('timeouts against a loopback server', () => {
       await server.close();
     }
     expect(server.closed).toBe(true);
+  });
+});
+
+describe('exit-code matrix', () => {
+  const okFetch: FetchLike = () => Promise.resolve(new Response(null, { status: 200 }));
+  const missingFetch: FetchLike = () => Promise.resolve(new Response(null, { status: 404 }));
+
+  it('clean local input without external checking exits 0', async () => {
+    const root = makeTempRoot();
+    writeFiles(root, { 'README.md': '# Clean' });
+
+    const result = await captureRun([join(root, 'README.md')]);
+    expect(result.exitCode).toBe(0);
+  });
+
+  it('broken local input without external checking exits 1', async () => {
+    const root = makeTempRoot();
+    writeFiles(root, { 'README.md': '[missing](missing.md)' });
+
+    const result = await captureRun([join(root, 'README.md')]);
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('missing.md — target does not exist');
+  });
+
+  it('clean external check exits 0', async () => {
+    const root = makeTempRoot();
+    writeFiles(root, { 'README.md': '[web](https://example.com/ok)' });
+
+    const result = await captureRun(['--external', join(root, 'README.md')], {
+      fetch: okFetch,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).not.toContain('—');
+  });
+
+  it('broken external check exits 1', async () => {
+    const root = makeTempRoot();
+    writeFiles(root, { 'README.md': '[web](https://example.com/missing)' });
+
+    const result = await captureRun(['--external', join(root, 'README.md')], {
+      fetch: missingFetch,
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('external HTTP 404');
+  });
+
+  it('local and external failures together exit 1', async () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': '[local](missing.md) and [web](https://example.com/missing)',
+    });
+
+    const result = await captureRun(['--external', join(root, 'README.md')], {
+      fetch: missingFetch,
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('missing.md — target does not exist');
+    expect(result.stdout).toContain('external HTTP 404');
+  });
+
+  it('usage error with external flag exits 2', async () => {
+    const result = await captureRun(['--json', '--external']);
+    expect(result.exitCode).toBe(2);
+    expect(parseJson(result.stdout).error?.kind).toBe('usage');
+  });
+
+  it('external mode changes exit status only through reported broken links', async () => {
+    const root = makeTempRoot();
+    writeFiles(root, { 'README.md': '[web](https://example.com/link)' });
+    const file = join(root, 'README.md');
+
+    const success = await captureRun(['--json', '--external', file], { fetch: okFetch });
+    const failure = await captureRun(['--json', '--external', file], { fetch: missingFetch });
+    const successDocument = parseJson(success.stdout);
+    const failureDocument = parseJson(failure.stdout);
+
+    expect(success.exitCode).toBe(0);
+    expect(successDocument.diagnostics).toEqual([]);
+    expect(failure.exitCode).toBe(1);
+    expect(failureDocument.diagnostics).toHaveLength(1);
+    expect(success.exitCode).toBe(successDocument.diagnostics.length === 0 ? 0 : 1);
+    expect(failure.exitCode).toBe(failureDocument.diagnostics.length === 0 ? 0 : 1);
   });
 });

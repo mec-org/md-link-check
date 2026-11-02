@@ -434,6 +434,28 @@ describe('deduplication and deterministic ordering', () => {
     expect(result.external.distinctChecked).toBe(10);
     expect(maxActive).toBe(4);
   });
+
+  it('applies the production default concurrency of four when no option is given', async () => {
+    const root = makeTempRoot();
+    const links = Array.from({ length: 10 }, (_value, index) =>
+      `[link ${index}](https://example.com/${index})`,
+    );
+    const file = markdownFile(root, links.join('\n'));
+
+    let active = 0;
+    let maxActive = 0;
+    const fetch: FetchLike = async () => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      active -= 1;
+      return new Response(null, { status: 200 });
+    };
+
+    const result = await checkMarkdownWithExternal([file], { fetch });
+    expect(result.external.distinctChecked).toBe(10);
+    expect(maxActive).toBe(4);
+  });
 });
 
 describe('retry and timeout policy', () => {

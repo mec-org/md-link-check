@@ -253,6 +253,9 @@ describe('M3 end-to-end stability', () => {
       expect(source).not.toMatch(/from ['"]node:(?:http|https|http2|net|dns|tls|dgram)['"]/);
       expect(source).not.toMatch(/\brequire\s*\(/);
       expect(source).not.toMatch(/\bimport\s*\(/);
+      // No bare global fetch call may appear anywhere; the only fetch is the
+      // injected function default, which is not called by name in this form.
+      expect(source).not.toMatch(/\bfetch\s*\(/);
     }
 
     // M5's only network access is the production default for the injected

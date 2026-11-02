@@ -5,7 +5,14 @@ import {
 } from './checker.js';
 import { discoverMarkdownFiles, InputError } from './discovery.js';
 import type { ExternalCheckOptions } from './external.js';
-import { formatDiagnostic, formatJson, formatSummary, HELP, USAGE_LINE } from './report.js';
+import {
+  formatDiagnostic,
+  formatJson,
+  formatSummary,
+  HELP,
+  USAGE_LINE,
+  type JsonError,
+} from './report.js';
 
 export interface CliIo {
   writeOut(text: string): void;
@@ -52,12 +59,15 @@ function emptyResult(externalEnabled: boolean): CheckResult {
  *
  * - 0 when checking completed and no broken target was found;
  * - 1 when checking completed and at least one broken target was found;
- * - 2 for a usage error (no input paths, unknown option, unreadable input).
+ * - 2 for a usage error (no input paths, unknown option, unreadable input) or
+ *   an internal failure that prevented checking from completing.
  *
- * Text diagnostics and the summary go to standard output. Usage errors go to
- * standard error. With `--json`, a check run writes exactly one JSON document
- * to standard output, including for usage errors; `--help` always prints help
- * and exits 0.
+ * Text diagnostics and the summary go to standard output. Usage errors and
+ * internal failures go to standard error. With `--json`, a check run writes
+ * exactly one JSON document to standard output, including for usage and
+ * internal errors; `--help` always prints help and exits 0. Internal failures
+ * are reported through the same structured result instead of escaping as an
+ * unhandled rejection or stack trace.
  *
  * External checking is strictly opt-in through `--external`. Without it no
  * fetch is called and HTTP(S) targets stay counted as skipped. Argument and
@@ -79,19 +89,19 @@ export async function run(
     return reportUsageError(parsed.error, parsed.json, parsed.external, io);
   }
 
-  let files: string[];
+  let result: CheckResult;
   try {
-    files = discoverMarkdownFiles(parsed.paths);
+    const files = discoverMarkdownFiles(parsed.paths);
+    result = parsed.external
+      ? await checkMarkdownWithExternal(files, options.external)
+      : checkMarkdown(files);
   } catch (error) {
     if (error instanceof InputError) {
       return reportUsageError(error.message, parsed.json, parsed.external, io);
     }
-    throw error;
+    return reportInternalError(error, parsed.json, parsed.external, io);
   }
 
-  const result = parsed.external
-    ? await checkMarkdownWithExternal(files, options.external)
-    : checkMarkdown(files);
   const exitCode = result.diagnostics.length === 0 ? 0 : 1;
 
   if (parsed.json) {
@@ -165,5 +175,29 @@ function reportUsageError(
   io.writeError(
     `md-link-check: ${message}\n\n${USAGE_LINE}\nRun "md-link-check --help" for usage and exit codes.\n`,
   );
+  return 2;
+}
+
+/**
+ * Reports an unexpected failure without letting it escape as a stack trace or
+ * an unhandled rejection. The message is kept short and deterministic; the raw
+ * error object and stack are never serialized.
+ */
+function reportInternalError(
+  error: unknown,
+  json: boolean,
+  external: boolean,
+  io: CliIo,
+): number {
+  const detail =
+    error instanceof Error && error.message !== '' ? error.message : 'unexpected failure';
+  const failure: JsonError = { kind: 'internal', message: detail };
+
+  if (json) {
+    io.writeOut(formatJson(emptyResult(external), 2, failure));
+    return 2;
+  }
+
+  io.writeError(`md-link-check: internal error: ${detail}\n`);
   return 2;
 }

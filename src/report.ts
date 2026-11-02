@@ -28,7 +28,7 @@ Options:
 Exit codes:
   0  checking completed and no broken targets were found
   1  checking completed and at least one broken target was found
-  2  usage error: no input paths, unknown option, or unreadable input path
+  2  usage error, or an internal failure that prevented checking from completing
 
 Output:
   Text diagnostics go to stdout as file:line: target — reason, followed by a
@@ -101,9 +101,9 @@ export interface JsonExternalSummary {
   results: JsonExternalResult[];
 }
 
-/** A usage error reported outside the diagnostics array. */
+/** A usage error or internal failure reported outside the diagnostics array. */
 export interface JsonError {
-  kind: 'usage';
+  kind: 'usage' | 'internal';
   message: string;
 }
 
@@ -124,10 +124,11 @@ export interface JsonReport {
 
 /**
  * Builds the version 1 report object from a checking run and its exit code. A
- * usage error is reported in the top-level `error` field, never as a
- * diagnostic, so consumers cannot mistake it for a broken link. The `external`
- * object is additive: pre-M5 consumers can ignore it and keep reading the same
- * top-level fields, summary counts and diagnostics.
+ * usage error or internal failure is reported in the top-level `error` field,
+ * never as a diagnostic, so consumers cannot mistake it for a broken link.
+ * `kind` distinguishes the two. The `external` object is additive: pre-M5
+ * consumers can ignore it and keep reading the same top-level fields, summary
+ * counts and diagnostics.
  */
 export function createJsonReport(
   result: CheckResult,

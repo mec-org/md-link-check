@@ -39,7 +39,7 @@ Options:
 
 `--json` and `--external` may be repeated; repeated flags are accepted idempotently.
 
-Text mode writes diagnostics and a final summary to standard output. Usage errors are written to standard error. With `--json`, a check run writes only the JSON document to standard output. `--help` always prints the help text to standard output and exits `0`, even when `--json` is also given. The process exit code is the same in both modes.
+Text mode writes diagnostics and a final summary to standard output. In text mode, usage errors and internal failures are written to standard error. With `--json`, a check run writes only the JSON document to standard output. `--help` always prints the help text to standard output and exits `0`, even when `--json` is also given. The process exit code is the same in both modes.
 
 ## Text output
 
@@ -140,7 +140,7 @@ The properties are:
 - `version`: schema version, currently `1`;
 - `ok`: `true` only when `exitCode` is `0`;
 - `exitCode`: the process exit code;
-- `error`: present only for a usage error; contains `kind` (`"usage"`) and `message`, and `diagnostics` is empty in that case;
+- `error`: present only for a usage error or an internal failure; contains `kind` (`"usage"` or `"internal"`) and `message`, and `diagnostics` is empty in that case;
 - `summary.filesChecked`: number of unique files checked;
 - `summary.broken`: number of diagnostics (broken targets and undefined reference uses);
 - `summary.externalSkipped`: number of skipped HTTP(S) link and image uses; `0` when `--external` is enabled;
@@ -177,11 +177,13 @@ A usage error keeps the same top-level shape: `ok` is `false`, `exitCode` is `2`
 }
 ```
 
+An internal failure that prevents checking from completing keeps the same top-level shape: `ok` is `false`, `exitCode` is `2`, the counts are zero, `diagnostics` is empty, and `error.kind` is `"internal"` with a short message. It never escapes as a stack trace or an unhandled rejection. The two kinds are distinguishable without parsing prose.
+
 ## Exit codes
 
 - `0`: checking completed and no broken targets were found;
 - `1`: checking completed and at least one broken target was found;
-- `2`: usage error: no input paths, an unknown option, or an input path that cannot be read.
+- `2`: usage error (no input paths, an unknown option, or an input path that cannot be read), or an internal failure that prevented checking from completing; the JSON `error.kind` distinguishes the two.
 
 A top-level input path that cannot be accessed is treated as an invalid command-line argument (exit `2`), not as a broken Markdown target. A broken target inside a readable Markdown file is always exit `1`. No other exit codes are used.
 
@@ -330,9 +332,9 @@ Exit codes keep their documented meanings:
 
 - `0`: checking completed and neither local nor enabled external broken links were found;
 - `1`: at least one local or enabled external broken link was reported;
-- `2`: usage error.
+- `2`: usage error, or an internal failure that prevented checking from completing.
 
-Without `--external`, unreachable external targets remain skipped and do not change the exit status. With `--external`, failed external checks produce diagnostics and therefore exit `1`, while successful checks do not change an otherwise clean status. Network failures are findings, not usage errors. Usage errors, including an unknown option or no input paths, still exit `2` and perform no network access.
+Without `--external`, unreachable external targets remain skipped and do not change the exit status. With `--external`, failed external checks produce diagnostics and therefore exit `1`, while successful checks do not change an otherwise clean status. Network failures are findings, not usage errors. Usage errors, including an unknown option or no input paths, still exit `2` and perform no network access. An internal failure is also reported through the structured text or JSON result and exits `2` without a stack trace.
 
 The first text summary line keeps its pre-M5 form and meaning. With `--external`, checked occurrences are not labeled skipped, and a second line reports external occurrences, distinct targets checked, successes, failures and broken occurrences; see [Text output](#text-output).
 

@@ -4,7 +4,7 @@ md-link-check is an offline CLI that finds broken relative links, images and hea
 
 See [PROJECT.md](PROJECT.md) for the charter, [ROADMAP.md](ROADMAP.md) for the milestones and [CONTRIBUTING.md](CONTRIBUTING.md) for who may open issues and pull requests.
 
-> **Status: M2 complete; M3 hardening in progress.** Inline and reference-style links and images, heading anchors, stable text output, `--json` and the documented exit codes are implemented. The M3 hardening pass is in progress; its real-docs verification run is still pending. See [Current limitations](#current-limitations).
+> **Status: M3 complete.** Inline and reference-style links and images, heading anchors, stable text output, `--json` and the documented exit codes are implemented, and the M3 hardening pass and real-docs verification run are complete. The release decision remains with the owner. See [Current limitations](#current-limitations).
 
 ## Requirements
 
@@ -205,6 +205,7 @@ The step fails the job with exit `1` when a broken target is found and exit `2` 
 - Heading slugs follow the project's GitHub-style rule, not every github-slugger edge case: Unicode normalisation, HTML entities and escaped punctuation are not modelled. The slug is taken from the heading's rendered text, so inline and reference-style link destinations are replaced by their labels, inline code keeps its literal content, matched emphasis markers are removed and intraword underscores are kept; characters that are not letters, numbers, combining marks, whitespace, hyphens or underscores are dropped (for example, an emoji is removed).
 - Multi-line setext headings use only the line directly above the underline. Text lines inside block quotes and list items are not treated as setext heading text, and headings inside block quotes are not collected.
 - Link labels and destinations, inline code spans and reference definitions must fit on one line. A link or code span that wraps across lines is not scanned as one span.
+- Placeholder or template links written as ordinary Markdown are checked as real targets; put illustrative link syntax in a code span or fenced code block so it is ignored.
 - Nested inline structures are treated as the outer reference only (for example, a linked image checks the outer link target and not the image).
 - Indented code detection is conservative, so a link or heading in a deeply indented block after a blank line can be missed.
 - Reference definitions follow a simplified single-line form: a definition line is recognised when it starts a line with up to three spaces. CommonMark's full block-boundary rules are not modelled. Labels are normalised only by trimming, collapsing internal spaces or tabs, and lowercasing, so backslash escapes inside labels are not normalised.

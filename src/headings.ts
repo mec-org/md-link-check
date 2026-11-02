@@ -10,6 +10,20 @@ export interface Heading {
   line: number;
 }
 
+/** A half-open range of an inline code span within heading text. */
+interface CodeRange {
+  start: number;
+  end: number;
+}
+
+/** One run of underscores and whether CommonMark can use it as a delimiter. */
+interface DelimiterRun {
+  start: number;
+  length: number;
+  canOpen: boolean;
+  canClose: boolean;
+}
+
 const ATX_HEADING = /^( {0,3})(#{1,6})(?=[ \t]|$)/;
 const SETEXT_UNDERLINE = /^ {0,3}(=+|-+)[ \t]*$/;
 const CLOSING_HASHES = /[ \t]+#+[ \t]*$/;
@@ -65,34 +79,222 @@ export function scanHeadings(markdown: string): Heading[] {
 }
 
 /**
- * Applies the project's GitHub-style heading slug rule: lowercase, drop
- * punctuation except hyphens, then convert whitespace to hyphens.
+ * Applies the project's GitHub-style heading slug rule to a heading's rendered
+ * text: lowercase, drop punctuation except hyphens and underscores, then
+ * convert whitespace to hyphens.
  *
- * Unicode normalisation, HTML entities, percent-decoding, escaped punctuation
- * and emoji are intentionally not modelled; anything that is not a letter,
- * number, combining mark, whitespace or hyphen is dropped.
+ * Inline link destinations are replaced by their labels, inline code keeps its
+ * literal content, and matched `_` emphasis markers are removed while literal
+ * intraword underscores stay. Unicode normalisation and HTML entities are not
+ * modelled; characters that are not letters, numbers, combining marks,
+ * whitespace, hyphens or underscores are dropped.
  */
 export function slugifyHeading(text: string): string {
-  return text
-    .trim()
+  return renderedHeadingText(text.trim())
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}\p{M}\s-]/gu, '')
+    .replace(/[^\p{L}\p{N}\p{M}\s_-]/gu, '')
     .replace(/\s/gu, '-');
 }
 
 /**
- * Collects the slug of every heading in document order. A repeated base slug
- * gets `-1`, `-2`, and so on, counted independently for each document.
+ * Collects the slug of every heading in document order. The first use of a base
+ * slug is returned unchanged; every slug handed out is then reserved, so
+ * repeated headings get the next free `-1`, `-2` suffix and a naturally
+ * occurring slug such as `foo-1` is never handed out twice.
  */
 export function collectHeadingSlugs(markdown: string): string[] {
-  const seen = new Map<string, number>();
+  const reserved = new Map<string, number>();
 
-  return scanHeadings(markdown).map((heading) => {
-    const base = slugifyHeading(heading.text);
-    const count = seen.get(base) ?? 0;
-    seen.set(base, count + 1);
-    return count === 0 ? base : `${base}-${count}`;
-  });
+  return scanHeadings(markdown).map((heading) =>
+    reserveSlug(slugifyHeading(heading.text), reserved),
+  );
+}
+
+function reserveSlug(base: string, reserved: Map<string, number>): string {
+  if (!reserved.has(base)) {
+    reserved.set(base, 0);
+    return base;
+  }
+
+  let slug = base;
+  while (reserved.has(slug)) {
+    const suffix = (reserved.get(base) ?? 0) + 1;
+    reserved.set(base, suffix);
+    slug = `${base}-${suffix}`;
+  }
+  reserved.set(slug, 0);
+  return slug;
+}
+
+/**
+ * Approximates the text GitHub renders for a heading before slugging: inline
+ * link syntax becomes its label, inline code is kept literally, and underscore
+ * emphasis markers are removed where CommonMark treats them as delimiters.
+ * Images and reference-style links remain outside M1's scope.
+ */
+function renderedHeadingText(text: string): string {
+  const withoutLinkDestinations = stripInlineLinkDestinations(text);
+  const codeRanges = inlineCodeRanges(withoutLinkDestinations);
+  return removeUnderscoreEmphasis(withoutLinkDestinations, codeRanges);
+}
+
+function stripInlineLinkDestinations(text: string): string {
+  let result = '';
+  let index = 0;
+
+  while (index < text.length) {
+    const character = text.charAt(index);
+
+    if (character === '`' && !isEscaped(text, index)) {
+      const fenceLength = countCharacterRun(text, index, '`');
+      const closing = findClosingBackticks(text, index + fenceLength, fenceLength);
+      if (closing !== -1) {
+        result += text.slice(index, closing + fenceLength);
+        index = closing + fenceLength;
+        continue;
+      }
+    }
+
+    if (character === '!' && text.charAt(index + 1) === '[' && !isEscaped(text, index)) {
+      const image = parseLinkLike(text, index + 1);
+      if (image !== null) {
+        result += text.slice(index, image.end);
+        index = image.end;
+        continue;
+      }
+    }
+
+    if (character === '[' && !isEscaped(text, index)) {
+      const link = parseLinkLike(text, index);
+      if (link !== null) {
+        result += stripInlineLinkDestinations(text.slice(index + 1, link.labelEnd));
+        index = link.end;
+        continue;
+      }
+    }
+
+    result += character;
+    index += 1;
+  }
+
+  return result;
+}
+
+function parseLinkLike(text: string, bracket: number): { labelEnd: number; end: number } | null {
+  const labelEnd = findClosingBracket(text, bracket);
+  if (labelEnd === -1 || text.charAt(labelEnd + 1) !== '(') {
+    return null;
+  }
+  const closing = findClosingParen(text, labelEnd + 1);
+  if (closing === -1) {
+    return null;
+  }
+  return { labelEnd, end: closing + 1 };
+}
+
+function inlineCodeRanges(text: string): CodeRange[] {
+  const ranges: CodeRange[] = [];
+  let index = 0;
+
+  while (index < text.length) {
+    if (text.charAt(index) !== '`' || isEscaped(text, index)) {
+      index += 1;
+      continue;
+    }
+    const fenceLength = countCharacterRun(text, index, '`');
+    const closing = findClosingBackticks(text, index + fenceLength, fenceLength);
+    if (closing === -1) {
+      index += fenceLength;
+      continue;
+    }
+    const end = closing + fenceLength;
+    ranges.push({ start: index, end });
+    index = end;
+  }
+
+  return ranges;
+}
+
+function removeUnderscoreEmphasis(text: string, codeRanges: readonly CodeRange[]): string {
+  const runs: DelimiterRun[] = [];
+  let codeIndex = 0;
+  let index = 0;
+
+  while (index < text.length) {
+    while (codeIndex < codeRanges.length && (codeRanges[codeIndex]?.end ?? 0) <= index) {
+      codeIndex += 1;
+    }
+    const codeRange = codeRanges[codeIndex];
+    if (codeRange !== undefined && index >= codeRange.start) {
+      index = codeRange.end;
+      continue;
+    }
+
+    if (text.charAt(index) !== '_' || isEscaped(text, index)) {
+      index += 1;
+      continue;
+    }
+    const length = countCharacterRun(text, index, '_');
+    runs.push(classifyUnderscoreRun(text, index, length));
+    index += length;
+  }
+
+  if (runs.length === 0) {
+    return text;
+  }
+
+  const removed = new Set<number>();
+  const openers: number[] = [];
+  for (let runIndex = 0; runIndex < runs.length; runIndex += 1) {
+    const run = runs[runIndex];
+    if (run === undefined) {
+      continue;
+    }
+    if (run.canClose && openers.length > 0) {
+      removed.add(runIndex);
+      const opener = openers.pop();
+      if (opener !== undefined) {
+        removed.add(opener);
+      }
+      continue;
+    }
+    if (run.canOpen) {
+      openers.push(runIndex);
+    }
+  }
+
+  if (removed.size === 0) {
+    return text;
+  }
+
+  let result = '';
+  let cursor = 0;
+  for (let runIndex = 0; runIndex < runs.length; runIndex += 1) {
+    const run = runs[runIndex];
+    if (run === undefined || !removed.has(runIndex)) {
+      continue;
+    }
+    result += text.slice(cursor, run.start);
+    cursor = run.start + run.length;
+  }
+  return result + text.slice(cursor);
+}
+
+function classifyUnderscoreRun(text: string, start: number, length: number): DelimiterRun {
+  const previous = start === 0 ? '' : text.charAt(start - 1);
+  const next = text.charAt(start + length);
+  const leftFlanking = next !== '' && !isWhitespaceCharacter(next);
+  const rightFlanking = previous !== '' && !isWhitespaceCharacter(previous);
+
+  return {
+    start,
+    length,
+    canOpen:
+      leftFlanking &&
+      (previous === '' || isWhitespaceCharacter(previous) || isPunctuationCharacter(previous)),
+    canClose:
+      rightFlanking && (next === '' || isWhitespaceCharacter(next) || isPunctuationCharacter(next)),
+  };
 }
 
 function parseAtxHeading(line: string): { level: number; text: string } | null {
@@ -115,4 +317,90 @@ function isSetextParagraphText(line: string, maskedLine: string): boolean {
     return false;
   }
   return !SETEXT_UNDERLINE.test(line) && !THEMATIC_BREAK.test(line) && !BLOCK_MARKER.test(line);
+}
+
+function findClosingBracket(text: string, open: number): number {
+  let depth = 0;
+  for (let index = open + 1; index < text.length; index += 1) {
+    const character = text.charAt(index);
+    if (character === '\\') {
+      index += 1;
+      continue;
+    }
+    if (character === '[') {
+      depth += 1;
+      continue;
+    }
+    if (character !== ']') {
+      continue;
+    }
+    if (depth === 0) {
+      return index;
+    }
+    depth -= 1;
+  }
+  return -1;
+}
+
+function findClosingParen(text: string, open: number): number {
+  let depth = 0;
+  for (let index = open + 1; index < text.length; index += 1) {
+    const character = text.charAt(index);
+    if (character === '\\') {
+      index += 1;
+      continue;
+    }
+    if (character === '(') {
+      depth += 1;
+      continue;
+    }
+    if (character !== ')') {
+      continue;
+    }
+    if (depth === 0) {
+      return index;
+    }
+    depth -= 1;
+  }
+  return -1;
+}
+
+function findClosingBackticks(text: string, start: number, length: number): number {
+  let index = start;
+  while (index < text.length) {
+    if (text.charAt(index) !== '`') {
+      index += 1;
+      continue;
+    }
+    const runLength = countCharacterRun(text, index, '`');
+    if (runLength === length) {
+      return index;
+    }
+    index += runLength;
+  }
+  return -1;
+}
+
+function countCharacterRun(text: string, start: number, character: string): number {
+  let length = 0;
+  while (text.charAt(start + length) === character) {
+    length += 1;
+  }
+  return length;
+}
+
+function isEscaped(text: string, index: number): boolean {
+  let backslashes = 0;
+  for (let cursor = index - 1; cursor >= 0 && text.charAt(cursor) === '\\'; cursor -= 1) {
+    backslashes += 1;
+  }
+  return backslashes % 2 === 1;
+}
+
+function isWhitespaceCharacter(character: string): boolean {
+  return /\s/u.test(character);
+}
+
+function isPunctuationCharacter(character: string): boolean {
+  return /[\p{P}\p{S}]/u.test(character);
 }

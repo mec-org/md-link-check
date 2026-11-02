@@ -36,7 +36,7 @@ export function checkMarkdownFiles(files: readonly string[]): Diagnostic[] {
       const target = reference.target.trim();
 
       if (target.startsWith('#')) {
-        const fragment = target.slice(1);
+        const fragment = decodeFragment(target.slice(1));
         if (fragment !== '' && !sourceSlugs.has(fragment)) {
           diagnostics.push(missingAnchor(file, reference));
         }
@@ -71,7 +71,7 @@ export function checkMarkdownFiles(files: readonly string[]): Diagnostic[] {
       }
 
       const targetSlugs = headingsOf(targetPath, null, headingSlugs);
-      if (!targetSlugs.has(fragment)) {
+      if (!targetSlugs.has(decodeFragment(fragment))) {
         diagnostics.push(missingAnchor(file, reference));
       }
     }
@@ -113,5 +113,17 @@ function statOf(targetPath: string): Stats | null {
     return statSync(targetPath);
   } catch {
     return null;
+  }
+}
+
+/**
+ * Decodes a percent-encoded fragment before comparing it with heading slugs.
+ * A fragment that is not valid percent-encoding is compared as written.
+ */
+function decodeFragment(fragment: string): string {
+  try {
+    return decodeURIComponent(fragment);
+  } catch {
+    return fragment;
   }
 }

@@ -49,9 +49,9 @@ Exit codes in M1:
 - existing files and directories, including directory targets with a trailing slash;
 - heading anchors (`[label](#anchor)` and `[label](docs/guide.md#anchor)`) in the same Markdown file or in an existing relative Markdown file;
 - ATX headings of one to six `#` with an optional closing `#` sequence, and setext headings underlined by `=` or `-`;
-- GitHub-style heading slugs: lowercase, punctuation dropped except hyphens, spaces converted to hyphens, and repeated headings suffixed `-1`, `-2`, and so on.
+- GitHub-style heading slugs: lowercase, punctuation dropped except hyphens and underscores, spaces converted to hyphens, inline link labels used instead of their destinations, matched emphasis markers removed, and every generated slug reserved so repetitions and collisions get the next free `-1`, `-2`, … suffix.
 
-A target with a fragment is resolved in two steps: the path is checked against the file system, then the fragment is checked against the target document's headings. A missing target file produces only the path diagnostic. Fragments are not checked for targets that are not existing Markdown files, such as directories, images and other file types.
+A target with a fragment is resolved in two steps: the path is checked against the file system, then the fragment is checked against the target document's headings. A percent-encoded fragment is decoded before that comparison; a fragment that is not valid percent-encoding is compared as written. A missing target file produces only the path diagnostic. Fragments are not checked for targets that are not existing Markdown files, such as directories, images and other file types.
 
 These targets are skipped and never fetched:
 
@@ -63,8 +63,7 @@ Fenced code blocks (backtick and tilde fences), indented code blocks and inline 
 ## Current limitations
 
 - Reference-style links (`[label][ref]`), autolinks and raw HTML links are not scanned. Explicit HTML anchors (`<a id>`, `<a name>`) are not recognised.
-- Heading slugs follow the project's stated rule, not every GitHub edge case: Unicode normalisation, HTML entities, percent-decoding, escaped punctuation and emoji handling are not modelled. Characters that are not letters, numbers, combining marks, whitespace or hyphens are dropped, so for example an emoji is removed rather than slugged.
-- A repeated heading's generated suffix can collide with a naturally occurring slug (for example a real `Repeat-1` heading); the stated rule does not disambiguate that case.
+- Heading slugs follow the project's GitHub-style rule, not every github-slugger edge case: Unicode normalisation, HTML entities and escaped punctuation are not modelled. The slug is taken from the heading's rendered text, so inline link destinations are replaced by their labels, inline code keeps its literal content, matched emphasis markers are removed and intraword underscores are kept; characters that are not letters, numbers, combining marks, whitespace, hyphens or underscores are dropped (for example, an emoji is removed).
 - Multi-line setext headings use only the line directly above the underline. Text lines inside block quotes and list items are not treated as setext heading text, and headings inside block quotes are not collected.
 - Nested inline structures are treated as the outer reference only (for example, a linked image checks the outer link target and not the image).
 - Indented code detection is conservative, so a link or heading in a deeply indented block after a blank line can be missed.

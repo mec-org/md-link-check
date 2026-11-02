@@ -364,3 +364,80 @@ describe('cross-file anchors', () => {
     ]);
   });
 });
+
+describe('GitHub slug compatibility', () => {
+  it('accepts an anchor that uses a literal underscore', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': [
+        '## scan_headings',
+        '',
+        '## _emphasis_',
+        '',
+        '[headings](#scan_headings) and [emphasis](#emphasis)',
+      ].join('\n'),
+    });
+
+    expect(check(root, 'README.md')).toEqual([]);
+  });
+
+  it('accepts anchors for reserved duplicate heading slugs', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': [
+        '# Foo',
+        '',
+        '# Foo',
+        '',
+        '# Foo-1',
+        '',
+        '[first](#foo) and [second](#foo-1) and [third](#foo-1-1)',
+      ].join('\n'),
+    });
+
+    expect(check(root, 'README.md')).toEqual([]);
+  });
+
+  it('accepts an anchor derived from a link label in a heading', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': ['## Read [the guide](guide.md)', '', '[guide](#read-the-guide)'].join('\n'),
+      'guide.md': '# The guide',
+    });
+
+    expect(check(root, 'README.md')).toEqual([]);
+  });
+
+  it('decodes a percent-encoded anchor before comparing', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': [
+        '# Café',
+        '',
+        '[same file](#caf%C3%A9) and [another file](other.md#caf%C3%A9)',
+      ].join('\n'),
+      'other.md': '## Café',
+    });
+
+    expect(check(root, 'README.md')).toEqual([]);
+  });
+
+  it('compares an invalid percent-encoded anchor as written', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': '[cafe](other.md#caf%E9)',
+      'other.md': '## Café',
+    });
+
+    expect(check(root, 'README.md')).toEqual([
+      {
+        file: join(root, 'README.md'),
+        line: 1,
+        column: 1,
+        kind: 'link',
+        target: 'other.md#caf%E9',
+        reason: 'anchor does not exist',
+      },
+    ]);
+  });
+});

@@ -99,6 +99,28 @@ describe('heading slugs', () => {
     expect(collectHeadingSlugs('# Repeat\n\n# Repeat')).toEqual(['repeat', 'repeat-1']);
     expect(collectHeadingSlugs('# Repeat')).toEqual(['repeat']);
   });
+
+  it('keeps literal underscores and removes emphasis markers', () => {
+    expect(collectHeadingSlugs('## scan_headings')).toEqual(['scan_headings']);
+    expect(collectHeadingSlugs('## _emphasis_')).toEqual(['emphasis']);
+    expect(collectHeadingSlugs('## __strong__ and snake_case')).toEqual(['strong-and-snake_case']);
+    expect(collectHeadingSlugs('## `scan_headings`')).toEqual(['scan_headings']);
+  });
+
+  it('reserves generated slugs so a taken slug gets the next free suffix', () => {
+    expect(collectHeadingSlugs('# Foo\n\n# Foo\n\n# Foo-1')).toEqual([
+      'foo',
+      'foo-1',
+      'foo-1-1',
+    ]);
+  });
+
+  it('slugs a heading from its rendered link text', () => {
+    expect(collectHeadingSlugs('## Read [the guide](guide.md)')).toEqual(['read-the-guide']);
+    expect(collectHeadingSlugs('## [the guide](guide.md) and _notes_')).toEqual([
+      'the-guide-and-notes',
+    ]);
+  });
 });
 
 describe('heading code exclusions', () => {

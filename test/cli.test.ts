@@ -10,16 +10,26 @@ function runCli(root: string, args: string[]) {
   return spawnSync(process.execPath, [cliPath, ...args], { cwd: root, encoding: 'utf8' });
 }
 
+interface JsonDiagnostic {
+  file: string;
+  line: number;
+  column: number;
+  kind: string;
+  target: string;
+  reason: string;
+}
+
 interface JsonDocument {
   version: number;
   ok: boolean;
   exitCode: number;
+  error?: { kind: string; message: string };
   summary: {
     filesChecked: number;
     broken: number;
     externalSkipped: number;
   };
-  diagnostics: Array<{ file: string; line: number; target: string; reason: string }>;
+  diagnostics: JsonDiagnostic[];
 }
 
 function parseJson(stdout: string): JsonDocument {
@@ -279,9 +289,26 @@ describe('JSON output', () => {
       {
         file: 'README.md',
         line: 3,
+        column: 5,
+        kind: 'link',
         target: 'docs/missing.md',
         reason: 'target does not exist',
       },
+    ]);
+  });
+
+  it('json diagnostics include column and kind', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': '[one](one.md) and ![two](two.png) and [three](three.md)',
+    });
+
+    const result = runCli(root, ['--json', 'README.md']);
+    const document = parseJson(result.stdout);
+    expect(document.diagnostics.map(({ kind, column }) => ({ kind, column }))).toEqual([
+      { kind: 'link', column: 1 },
+      { kind: 'image', column: 19 },
+      { kind: 'link', column: 39 },
     ]);
   });
 
@@ -355,9 +382,28 @@ describe('JSON output', () => {
     expect(document.ok).toBe(false);
     expect(document.exitCode).toBe(2);
     expect(document.summary).toEqual({ filesChecked: 0, broken: 0, externalSkipped: 0 });
-    expect(document.diagnostics).toEqual([
-      { file: '', line: 0, target: '', reason: 'no input paths' },
-    ]);
+    expect(document.diagnostics).toEqual([]);
+    expect(document.error).toEqual({ kind: 'usage', message: 'no input paths' });
+  });
+
+  it('json usage errors are reported outside diagnostics', () => {
+    const root = makeTempRoot();
+
+    const result = runCli(root, ['--json']);
+    const document = parseJson(result.stdout);
+    expect(document.diagnostics).toEqual([]);
+    expect(document.error).toEqual({ kind: 'usage', message: 'no input paths' });
+  });
+
+  it('json help prints the help text instead of a JSON report', () => {
+    const root = makeTempRoot();
+
+    const result = runCli(root, ['--json', '--help']);
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toContain('Usage:');
+    expect(result.stdout).toContain('Exit codes:');
+    expect(result.stdout.trim().startsWith('{')).toBe(false);
   });
 
   it('json flag accepts one or more paths', () => {
@@ -483,6 +529,8 @@ describe('exit codes and usage', () => {
     expect(result.status).toBe(2);
     const document = parseJson(result.stdout);
     expect(document.exitCode).toBe(2);
-    expect(document.diagnostics[0]?.reason).toContain('cannot access input path "missing.md"');
+    expect(document.diagnostics).toEqual([]);
+    expect(document.error?.kind).toBe('usage');
+    expect(document.error?.message).toContain('cannot access input path "missing.md"');
   });
 });

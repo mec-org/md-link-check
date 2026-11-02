@@ -112,6 +112,17 @@ describe('reference-style Markdown scanning', () => {
     expect(definitions(markdown)).toEqual([{ label: 'docs', target: 'docs/guide.md', line: 3 }]);
   });
 
+  it('collapses internal whitespace in reference labels', () => {
+    const markdown = ['[guide][the  doc]', '', '[the\tdoc]: docs/guide.md'].join('\n');
+
+    expect(referenceUses(markdown)).toEqual([
+      { kind: 'link', label: 'the doc', line: 1, column: 1 },
+    ]);
+    expect(definitions(markdown)).toEqual([
+      { label: 'the doc', target: 'docs/guide.md', line: 3 },
+    ]);
+  });
+
   it('does not emit a reference definition as an inline link', () => {
     const markdown = ['[guide][docs]', '', '[docs]: docs/guide.md'].join('\n');
 

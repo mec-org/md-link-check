@@ -602,6 +602,24 @@ describe('reference-style target checking', () => {
     expect(check(firstGood, 'README.md')).toEqual([]);
   });
 
+  it('resolves a reference label with collapsed whitespace', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': ['[guide][the  doc]', '', '[the doc]: docs/missing.md'].join('\n'),
+    });
+
+    expect(check(root, 'README.md')).toEqual([
+      {
+        file: join(root, 'README.md'),
+        line: 1,
+        column: 1,
+        kind: 'link',
+        target: 'docs/missing.md',
+        reason: 'target does not exist',
+      },
+    ]);
+  });
+
   it('checks anchors on a reference-style destination', () => {
     const root = makeTempRoot();
     writeFiles(root, {

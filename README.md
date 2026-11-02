@@ -36,7 +36,7 @@ Options:
 - `--help` (or `-h`) prints usage and the exit codes and exits `0`;
 - `--` ends option parsing, so a path beginning with `-` can be checked.
 
-Text mode writes diagnostics and a final summary to standard output. Usage errors are written to standard error. With `--json`, standard output contains only the JSON document. The process exit code is the same in both modes.
+Text mode writes diagnostics and a final summary to standard output. Usage errors are written to standard error. With `--json`, a check run writes only the JSON document to standard output. `--help` always prints the help text to standard output and exits `0`, even when `--json` is also given. The process exit code is the same in both modes.
 
 ## Text output
 
@@ -96,6 +96,8 @@ A broken run fills `diagnostics` in deterministic order:
     {
       "file": "docs/guide.md",
       "line": 12,
+      "column": 5,
+      "kind": "link",
       "target": "../api/missing.md",
       "reason": "target does not exist"
     }
@@ -108,31 +110,29 @@ The properties are:
 - `version`: schema version, currently `1`;
 - `ok`: `true` only when `exitCode` is `0`;
 - `exitCode`: the process exit code;
+- `error`: present only for a usage error; contains `kind` (`"usage"`) and `message`, and `diagnostics` is empty in that case;
 - `summary.filesChecked`: number of unique files checked;
 - `summary.broken`: number of diagnostics (broken targets and undefined reference uses);
 - `summary.externalSkipped`: number of skipped HTTP(S) link and image uses;
-- `diagnostics`: ordered array of `{ file, line, target, reason }` objects.
+- `diagnostics`: ordered array of `{ file, line, column, kind, target, reason }` objects. `column` is one-based and `kind` is `"link"` or `"image"`.
 
-A usage error keeps the same top-level shape: `ok` is `false`, `exitCode` is `2`, the summary counts are zero, and `diagnostics` contains one entry with an empty `file` and `target`, `line` `0`, and the error message as `reason`. For example:
+A usage error keeps the same top-level shape: `ok` is `false`, `exitCode` is `2`, the summary counts are zero, `diagnostics` is empty, and the top-level `error` field describes the failure (`kind` is `"usage"`, `message` is the error). A usage error is never reported as a link diagnostic. For example:
 
 ```json
 {
   "version": 1,
   "ok": false,
   "exitCode": 2,
+  "error": {
+    "kind": "usage",
+    "message": "no input paths"
+  },
   "summary": {
     "filesChecked": 0,
     "broken": 0,
     "externalSkipped": 0
   },
-  "diagnostics": [
-    {
-      "file": "",
-      "line": 0,
-      "target": "",
-      "reason": "no input paths"
-    }
-  ]
+  "diagnostics": []
 }
 ```
 
@@ -167,7 +167,7 @@ Reference definitions use `[label]: target`, optionally indented by up to three 
 [architecture]: images/architecture.png
 ```
 
-Reference labels match case-insensitively and surrounding whitespace is trimmed; internal whitespace is not collapsed. A definition applies to uses in the same Markdown file. When a label is defined more than once, the first definition wins and later definitions are ignored. A definition that is never used produces no finding and does not affect the external count. An undefined full or collapsed reference use is reported at the use line with reason `reference definition does not exist`; an undefined shortcut (`[text]`) is left as ordinary bracketed text so prose does not produce findings.
+Reference labels match case-insensitively; surrounding whitespace is trimmed and every internal run of spaces or tabs collapses to one space. A definition applies to uses in the same Markdown file. When a label is defined more than once, the first definition wins and later definitions are ignored. A definition that is never used produces no finding and does not affect the external count. An undefined full or collapsed reference use is reported at the use line with reason `reference definition does not exist`; an undefined shortcut (`[text]`) is left as ordinary bracketed text so prose does not produce findings.
 
 These targets are skipped and never fetched:
 
@@ -189,7 +189,7 @@ Other URI schemes (`mailto:`, `ftp:`), protocol-relative targets (`//example.com
 - Multi-line setext headings use only the line directly above the underline. Text lines inside block quotes and list items are not treated as setext heading text, and headings inside block quotes are not collected.
 - Nested inline structures are treated as the outer reference only (for example, a linked image checks the outer link target and not the image).
 - Indented code detection is conservative, so a link or heading in a deeply indented block after a blank line can be missed.
-- Reference definitions and labels must fit on one line. Multi-line definitions and labels, internal whitespace collapsing, and CommonMark's full block-boundary rules are not modelled: a definition line is recognised when it starts a line with up to three spaces. Labels are compared literally after trimming and lowercasing, so backslash escapes inside labels are not normalised.
+- Reference definitions and labels must fit on one line. Multi-line definitions and labels and CommonMark's full block-boundary rules are not modelled: a definition line is recognised when it starts a line with up to three spaces. Labels are normalised only by trimming, collapsing internal spaces or tabs, and lowercasing, so backslash escapes inside labels are not normalised.
 - HTTP(S) and other external targets are never fetched or validated.
 
 ## Development

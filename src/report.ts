@@ -26,8 +26,9 @@ Exit codes:
 
 Output:
   Text diagnostics go to stdout as file:line: target — reason, followed by a
-  summary line. Usage errors go to stderr. In --json mode stdout carries only
-  the JSON document. See README.md for the JSON schema.
+  summary line. Usage errors go to stderr. A --json check run writes only the
+  JSON document to stdout; --help always prints this help to stdout. See
+  README.md for the JSON schema.
 `;
 
 /** Formats one broken target as `file:line: target — reason`. */
@@ -47,8 +48,16 @@ export function formatSummary(result: CheckResult): string {
 export interface JsonDiagnostic {
   file: string;
   line: number;
+  column: number;
+  kind: Diagnostic['kind'];
   target: string;
   reason: string;
+}
+
+/** A usage error reported outside the diagnostics array. */
+export interface JsonError {
+  kind: 'usage';
+  message: string;
 }
 
 /** The version 1 JSON document written by `--json`. */
@@ -56,6 +65,7 @@ export interface JsonReport {
   version: 1;
   ok: boolean;
   exitCode: number;
+  error?: JsonError;
   summary: {
     filesChecked: number;
     broken: number;
@@ -64,12 +74,21 @@ export interface JsonReport {
   diagnostics: JsonDiagnostic[];
 }
 
-/** Builds the version 1 report object from a checking run and its exit code. */
-export function createJsonReport(result: CheckResult, exitCode: number): JsonReport {
+/**
+ * Builds the version 1 report object from a checking run and its exit code. A
+ * usage error is reported in the top-level `error` field, never as a
+ * diagnostic, so consumers cannot mistake it for a broken link.
+ */
+export function createJsonReport(
+  result: CheckResult,
+  exitCode: number,
+  error?: JsonError,
+): JsonReport {
   return {
     version: 1,
     ok: exitCode === 0,
     exitCode,
+    ...(error === undefined ? {} : { error }),
     summary: {
       filesChecked: result.filesChecked,
       broken: result.broken,
@@ -78,6 +97,8 @@ export function createJsonReport(result: CheckResult, exitCode: number): JsonRep
     diagnostics: result.diagnostics.map((diagnostic) => ({
       file: diagnostic.file,
       line: diagnostic.line,
+      column: diagnostic.column,
+      kind: diagnostic.kind,
       target: diagnostic.target,
       reason: diagnostic.reason,
     })),
@@ -85,8 +106,8 @@ export function createJsonReport(result: CheckResult, exitCode: number): JsonRep
 }
 
 /** Serializes the JSON report as exactly one document plus a trailing newline. */
-export function formatJson(result: CheckResult, exitCode: number): string {
-  return `${JSON.stringify(createJsonReport(result, exitCode), null, 2)}\n`;
+export function formatJson(result: CheckResult, exitCode: number, error?: JsonError): string {
+  return `${JSON.stringify(createJsonReport(result, exitCode, error), null, 2)}\n`;
 }
 
 function count(value: number, noun: string): string {

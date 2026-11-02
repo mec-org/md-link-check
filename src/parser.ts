@@ -463,11 +463,12 @@ function parseReferenceUse(
 }
 
 /**
- * Normalizes a reference label for matching: surrounding whitespace is trimmed
- * and the text is lowercased. Internal whitespace is not collapsed.
+ * Normalizes a reference label for matching: surrounding whitespace is trimmed,
+ * every internal run of spaces or tabs collapses to one space, and the text is
+ * lowercased.
  */
 function normalizeLabel(label: string): string {
-  return label.trim().toLowerCase();
+  return label.trim().replace(/[ \t]+/g, ' ').toLowerCase();
 }
 
 /** True when the text contains a `[` or `]` that is not backslash-escaped. */

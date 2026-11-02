@@ -29,19 +29,15 @@ const EMPTY_RESULT: CheckResult = {
  * - 2 for a usage error (no input paths, unknown option, unreadable input).
  *
  * Text diagnostics and the summary go to standard output. Usage errors go to
- * standard error. With `--json`, standard output carries exactly one JSON
- * document, including for usage errors.
+ * standard error. With `--json`, a check run writes exactly one JSON document
+ * to standard output, including for usage errors; `--help` always prints help
+ * and exits 0.
  */
 export function run(args: readonly string[], io: CliIo): number {
   const parsed = parseArgs(args);
 
   if (parsed.help) {
-    if (parsed.json) {
-      io.writeOut(formatJson(EMPTY_RESULT, 0));
-      io.writeError(HELP);
-    } else {
-      io.writeOut(HELP);
-    }
+    io.writeOut(HELP);
     return 0;
   }
 
@@ -115,15 +111,7 @@ function parseArgs(args: readonly string[]): ParsedArgs {
 
 function reportUsageError(message: string, json: boolean, io: CliIo): number {
   if (json) {
-    const result: CheckResult = {
-      diagnostics: [
-        { file: '', line: 0, column: 0, kind: 'link', target: '', reason: message },
-      ],
-      filesChecked: 0,
-      broken: 0,
-      externalSkipped: 0,
-    };
-    io.writeOut(formatJson(result, 2));
+    io.writeOut(formatJson(EMPTY_RESULT, 2, { kind: 'usage', message }));
     return 2;
   }
 

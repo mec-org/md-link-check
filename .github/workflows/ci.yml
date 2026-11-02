@@ -25,6 +25,10 @@ jobs:
         run: |
           [ -f package.json ] || exit 0
           npm ci --ignore-scripts
+      - name: Type-check
+        run: |
+          [ -f package.json ] || exit 0
+          npm run typecheck
       - name: Test
         run: |
           [ -f package.json ] || exit 0

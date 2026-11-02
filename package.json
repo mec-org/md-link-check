@@ -1,0 +1,27 @@
+{
+  "name": "md-link-check",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Offline CLI that finds broken relative links, images and heading anchors in Markdown.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "bin": {
+    "md-link-check": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "pretest": "npm run build",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "typescript": "5.9.3",
+    "vitest": "5.0.2"
+  }
+}

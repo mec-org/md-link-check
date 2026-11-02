@@ -4,7 +4,7 @@ md-link-check is an offline CLI that finds broken relative links, images and hea
 
 See [PROJECT.md](PROJECT.md) for the charter, [ROADMAP.md](ROADMAP.md) for the milestones and [CONTRIBUTING.md](CONTRIBUTING.md) for who may open issues and pull requests.
 
-> **Status: M3 hardening and the real-docs run are complete; merge verification is pending.** Inline and reference-style links and images, heading anchors, stable text output, `--json` and the documented exit codes are implemented. The hardening pass and the real-docs verification run are complete: 18 Markdown files checked, 2 confirmed real broken targets, and no checker false positives. CI green on `main` and the release decision follow the merge. See [Current limitations](#current-limitations).
+> **Status: v0.1's checks are implemented.** Inline and reference-style links and images, heading anchors, stable text output, `--json` and the documented exit codes are implemented. The release decision is the owner's. See [Current limitations](#current-limitations).
 
 ## Requirements
 
@@ -172,8 +172,7 @@ Reference labels match case-insensitively; surrounding whitespace is trimmed and
 These targets are skipped and never fetched:
 
 - HTTP and HTTPS URLs, and other URI schemes such as `mailto:`;
-- root-relative targets such as `/docs/guide.md`;
-- any relative-looking target that begins with a URI scheme, such as `notes:2024.md` or `C:\docs\guide.md`.
+- root-relative targets such as `/docs/guide.md`.
 
 Fenced code blocks (backtick and tilde fences) and indented code blocks at the top level, and single-line inline code, are ignored by the scanner for links, images, reference definitions and headings, so examples inside them do not produce diagnostics, do not define references and do not define anchors.
 
@@ -211,9 +210,7 @@ The step fails the job with exit `1` when a broken target is found and exit `2` 
 - Nested inline structures are treated as the outer reference only (for example, a linked image checks the outer link target and not the image).
 - Indented code detection is conservative, so a link or heading in a deeply indented block after a blank line can be missed.
 - Reference definitions follow a simplified single-line form: a definition line is recognised when it starts a line with up to three spaces. CommonMark's full block-boundary rules are not modelled. Labels are normalised only by trimming, collapsing internal spaces or tabs, and lowercasing, so backslash escapes inside labels are not normalised.
-- Paths are compared literally against the filesystem. Percent-encoded path characters such as `%20` and `%23` are not decoded, so a link to `docs/my%20guide.md` checks for a file named `my%20guide.md`, not `my guide.md`. Percent-encoded fragments are decoded; see above.
-- Query strings are not stripped. `docs/guide.md?plain=1` is checked for a file whose name ends in `?plain=1`, not for `docs/guide.md`.
-- A target that begins with a URI scheme is skipped even when it looks like a filename, for example `notes:2024.md` or `C:\docs\guide.md`; see the skipped targets above.
+- Unsupported or unspecified: percent-encoded path characters, query strings, and scheme-like or colon-containing targets (including Windows drive paths). Do not rely on a particular interpretation of these forms in v0.1. Percent-encoded fragments are decoded; see above.
 - Windows-style backslashes are not converted to separators. On POSIX systems `docs\guide.md` is a literal filename, so a Windows-style target normally does not resolve there. Case sensitivity follows the host filesystem: `Guide.md` and `guide.md` are different files on a case-sensitive filesystem.
 - Relative targets are resolved against the containing Markdown file and may point outside the supplied paths; the tool checks those targets as well.
 - Explicit symlink inputs are followed. During a directory walk, symlinked files and directories are skipped. A target's existence check uses `stat`, which follows symlinks.

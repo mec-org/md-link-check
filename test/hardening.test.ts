@@ -18,6 +18,10 @@ interface JsonDocument {
   version: number;
   ok: boolean;
   exitCode: number;
+  error?: {
+    kind: string;
+    message: string;
+  };
   summary: {
     filesChecked: number;
     broken: number;
@@ -201,6 +205,18 @@ describe('M3 end-to-end stability', () => {
     expect(result.stderr).toContain('no input paths');
   });
 
+  it('json usage error is valid JSON with exit 2', () => {
+    const result = captureRun(['--json']);
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toBe('');
+
+    const document = parseJson(result.stdout);
+    expect(document.ok).toBe(false);
+    expect(document.exitCode).toBe(2);
+    expect(document.error).toEqual({ kind: 'usage', message: 'no input paths' });
+    expect(document.diagnostics).toEqual([]);
+  });
+
   it('external links are counted without calling fetch', () => {
     const root = makeTempRoot();
     writeFiles(root, {
@@ -229,12 +245,14 @@ describe('M3 end-to-end stability', () => {
 
   it('source contains no network client imports', () => {
     const sourceDirectory = fileURLToPath(new URL('../src/', import.meta.url));
-    const sources = readdirSync(sourceDirectory)
+    const sources = readdirSync(sourceDirectory, { recursive: true, encoding: 'utf8' })
       .filter((name) => name.endsWith('.ts'))
       .map((name) => readFileSync(join(sourceDirectory, name), 'utf8'));
 
     for (const source of sources) {
-      expect(source).not.toMatch(/from ['"]node:(?:http|https|net|dns|tls)['"]/);
+      expect(source).not.toMatch(/from ['"]node:(?:http|https|http2|net|dns|tls|dgram)['"]/);
+      expect(source).not.toMatch(/\brequire\s*\(/);
+      expect(source).not.toMatch(/\bimport\s*\(/);
       expect(source).not.toMatch(/\bfetch\s*\(/);
     }
   });

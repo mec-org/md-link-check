@@ -1,5 +1,11 @@
 import { readFileSync, statSync, type Stats } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import {
+  checkExternalOccurrences,
+  type ExternalCheckOptions,
+  type ExternalOccurrence,
+  type ExternalTargetResult,
+} from './external.js';
 import { collectDocumentAnchors } from './headings.js';
 import {
   scanHtml,
@@ -22,6 +28,29 @@ export interface Diagnostic {
   reason: string;
 }
 
+/**
+ * Summary of the external-checking part of a run. External source occurrences
+ * are always counted; network requests happen only when checking is enabled.
+ */
+export interface ExternalSummary {
+  /** Whether `--external` enabled network checking for this run. */
+  enabled: boolean;
+  /** Number of supported HTTP(S) link and image occurrences. */
+  occurrences: number;
+  /** Number of HTTP(S) occurrences skipped because checking was disabled. */
+  skipped: number;
+  /** Number of distinct normalized targets checked; 0 when disabled. */
+  distinctChecked: number;
+  /** Distinct targets whose final HTTP outcome was successful. */
+  succeeded: number;
+  /** Distinct targets that ended as broken links. */
+  failed: number;
+  /** Number of source occurrences reported as broken through a failed target. */
+  brokenOccurrences: number;
+  /** One structured result per distinct checked target, in first-occurrence order. */
+  results: ExternalTargetResult[];
+}
+
 /** Everything one checking run produced, ready for either reporter. */
 export interface CheckResult {
   /** Broken targets and undefined references, in deterministic document order. */
@@ -32,6 +61,8 @@ export interface CheckResult {
   broken: number;
   /** Number of skipped HTTP(S) link and image uses. */
   externalSkipped: number;
+  /** External-check summary counts and structured per-target results. */
+  external: ExternalSummary;
 }
 
 /**
@@ -55,12 +86,28 @@ type PendingTarget =
       readonly column: number;
     };
 
+interface CheckPlan {
+  readonly filesChecked: number;
+  /**
+   * In document order: either a finished local diagnostic or an external
+   * occurrence whose diagnostic (if any) is only known after network checks.
+   */
+  readonly entries: CheckPlanEntry[];
+}
+
+type CheckPlanEntry =
+  | { readonly kind: 'finding'; readonly diagnostic: Diagnostic }
+  | { readonly kind: 'external'; readonly occurrence: ExternalOccurrence };
+
 /**
  * Checks every relative link and image target in the given Markdown files, then
  * the heading anchors and explicit `<a id>`/`<a name>` anchors of fragment-only
  * targets and of relative Markdown targets that exist. This covers Markdown
  * forms and the supported raw HTML forms (`<a href>` and `<img src>`). Use sites
  * from both scanners are checked in document order.
+ *
+ * HTTP(S) targets are counted as skipped and are never fetched. This is the
+ * default, fully offline path; use `checkMarkdownWithExternal` for `--external`.
  *
  * Reference-style uses are resolved through their definition in the same
  * document, and are reported at the use site. Every broken target is collected;
@@ -70,9 +117,97 @@ type PendingTarget =
  * completed anchor sets, so duplicate-numbering state never crosses documents.
  */
 export function checkMarkdown(files: readonly string[]): CheckResult {
+  const plan = collectCheckPlan(files);
+  const occurrences = externalOccurrencesOf(plan);
+  const diagnostics = plan.entries.flatMap((entry) =>
+    entry.kind === 'finding' ? [entry.diagnostic] : [],
+  );
+
+  return {
+    diagnostics,
+    filesChecked: plan.filesChecked,
+    broken: diagnostics.length,
+    externalSkipped: occurrences.length,
+    external: {
+      enabled: false,
+      occurrences: occurrences.length,
+      skipped: occurrences.length,
+      distinctChecked: 0,
+      succeeded: 0,
+      failed: 0,
+      brokenOccurrences: 0,
+      results: [],
+    },
+  };
+}
+
+/**
+ * Like `checkMarkdown`, but checks each distinct HTTP(S) target with the
+ * injected (by default built-in) fetch, and turns every failed source
+ * occurrence into an ordinary broken-link diagnostic. Duplicate occurrences
+ * share one request. External failures never suppress local diagnostics, and
+ * diagnostics keep document order regardless of response completion order.
+ */
+export async function checkMarkdownWithExternal(
+  files: readonly string[],
+  options: ExternalCheckOptions = {},
+): Promise<CheckResult> {
+  const plan = collectCheckPlan(files);
+  const occurrences = externalOccurrencesOf(plan);
+  const outcome = await checkExternalOccurrences(occurrences, options);
+
   const diagnostics: Diagnostic[] = [];
+  let occurrenceIndex = 0;
+  let brokenOccurrences = 0;
+
+  for (const entry of plan.entries) {
+    if (entry.kind === 'finding') {
+      diagnostics.push(entry.diagnostic);
+      continue;
+    }
+
+    const result = outcome.byOccurrence[occurrenceIndex];
+    occurrenceIndex += 1;
+    if (result === undefined || result.status !== 'failed') {
+      continue;
+    }
+    brokenOccurrences += 1;
+    diagnostics.push({ ...entry.occurrence, reason: externalFailureReason(result) });
+  }
+
+  const succeeded = outcome.results.filter((result) => result.status === 'succeeded').length;
+
+  return {
+    diagnostics,
+    filesChecked: plan.filesChecked,
+    broken: diagnostics.length,
+    externalSkipped: 0,
+    external: {
+      enabled: true,
+      occurrences: occurrenceIndex,
+      skipped: 0,
+      distinctChecked: outcome.results.length,
+      succeeded,
+      failed: outcome.results.length - succeeded,
+      brokenOccurrences,
+      results: outcome.results,
+    },
+  };
+}
+
+/**
+ * Compatibility wrapper for callers that only need the diagnostics. It never
+ * performs network access; new code should use `checkMarkdown`, which also
+ * reports the summary counts.
+ */
+export function checkMarkdownFiles(files: readonly string[]): Diagnostic[] {
+  return checkMarkdown(files).diagnostics;
+}
+
+/** Collects local diagnostics and external occurrences in document order. */
+function collectCheckPlan(files: readonly string[]): CheckPlan {
+  const entries: CheckPlanEntry[] = [];
   const documentAnchors = new Map<string, ReadonlySet<string>>();
-  let externalSkipped = 0;
 
   for (const file of files) {
     const markdown = readFileSync(file, 'utf8');
@@ -85,13 +220,16 @@ export function checkMarkdown(files: readonly string[]): CheckResult {
       if (use.style === 'reference') {
         const definition = markdownScan.definitions.get(use.label);
         if (definition === undefined) {
-          diagnostics.push({
-            file,
-            line: use.line,
-            column: use.column,
-            kind: use.kind,
-            target: use.labelText,
-            reason: 'reference definition does not exist',
+          entries.push({
+            kind: 'finding',
+            diagnostic: {
+              file,
+              line: use.line,
+              column: use.column,
+              kind: use.kind,
+              target: use.labelText,
+              reason: 'reference definition does not exist',
+            },
           });
           continue;
         }
@@ -101,8 +239,19 @@ export function checkMarkdown(files: readonly string[]): CheckResult {
       }
 
       if (isCountedExternal(target)) {
-        externalSkipped += 1;
+        entries.push({
+          kind: 'external',
+          occurrence: {
+            file,
+            line: use.line,
+            column: use.column,
+            kind: use.kind,
+            target,
+          },
+        });
+        continue;
       }
+
       const diagnostic = checkTarget(
         file,
         target,
@@ -113,20 +262,42 @@ export function checkMarkdown(files: readonly string[]): CheckResult {
         documentAnchors,
       );
       if (diagnostic !== null) {
-        diagnostics.push(diagnostic);
+        entries.push({ kind: 'finding', diagnostic });
       }
     }
   }
 
-  return { diagnostics, filesChecked: files.length, broken: diagnostics.length, externalSkipped };
+  return { filesChecked: files.length, entries };
+}
+
+function externalOccurrencesOf(plan: CheckPlan): ExternalOccurrence[] {
+  return plan.entries.flatMap((entry) => (entry.kind === 'external' ? [entry.occurrence] : []));
 }
 
 /**
- * Compatibility wrapper for callers that only need the diagnostics. New code
- * should use `checkMarkdown`, which also reports the summary counts.
+ * Builds the stable diagnostic reason for a failed distinct target. Attempt
+ * counts appear only when a retry happened; no error object or platform text is
+ * ever included.
  */
-export function checkMarkdownFiles(files: readonly string[]): Diagnostic[] {
-  return checkMarkdown(files).diagnostics;
+function externalFailureReason(result: ExternalTargetResult): string {
+  const suffix = `${result.attempts} ${result.attempts === 1 ? 'attempt' : 'attempts'}`;
+
+  switch (result.failureKind) {
+    case 'http': {
+      const status = result.httpStatus === undefined ? 'error' : String(result.httpStatus);
+      return result.attempts > 1
+        ? `external HTTP ${status} after ${suffix}`
+        : `external HTTP ${status}`;
+    }
+    case 'timeout':
+      return `external request timed out after ${suffix}`;
+    case 'network':
+      return `external network failure after ${suffix}`;
+    case 'invalid-url':
+      return 'external invalid URL';
+    default:
+      return 'external check failed';
+  }
 }
 
 /**

@@ -534,3 +534,191 @@ describe('exit codes and usage', () => {
     expect(document.error?.message).toContain('cannot access input path "missing.md"');
   });
 });
+
+describe('raw HTML anchors and targets', () => {
+  it('valid raw HTML targets exit 0', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': [
+        '<a id="section"></a>',
+        '',
+        '<a href="#section">same</a> and <a href="docs/guide.md#installation">guide</a>',
+        '',
+        '<img src="assets/logo.png" alt="Logo">',
+      ].join('\n'),
+      'docs/guide.md': ['# Guide', '', '<a name="installation"></a>'].join('\n'),
+      'assets/logo.png': '',
+    });
+
+    const result = runCli(root, ['README.md']);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('Checked 1 file: 0 broken targets, 0 external links skipped.\n');
+    expect(result.stderr).toBe('');
+  });
+
+  it('missing raw HTML link exits 1', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': ['# Project', '', '<a href="docs/missing.md">guide</a>'].join('\n'),
+    });
+
+    const result = runCli(root, ['README.md']);
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('docs/missing.md — target does not exist');
+  });
+
+  it('missing raw HTML image exits 1', () => {
+    const root = makeTempRoot();
+    writeFiles(root, { 'README.md': '<img src="assets/missing.png">' });
+
+    const result = runCli(root, ['README.md']);
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('assets/missing.png — target does not exist');
+  });
+
+  it('missing explicit anchor exits 1', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': ['<a id="section"></a>', '', '<a href="#missing">jump</a>'].join('\n'),
+    });
+
+    const result = runCli(root, ['README.md']);
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('#missing — anchor does not exist');
+  });
+
+  it('raw HTML diagnostics use the existing text format', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': ['# Project', '', '<a href="docs/missing.md">guide</a>'].join('\n'),
+    });
+
+    const result = runCli(root, ['README.md']);
+    expect(result.stdout.split('\n')[0]).toBe(
+      'README.md:3: docs/missing.md — target does not exist',
+    );
+    expect(result.stdout.trimEnd().split('\n').at(-1)).toBe(
+      'Checked 1 file: 1 broken target, 0 external links skipped.',
+    );
+  });
+
+  it('raw HTML diagnostics appear in JSON output', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': ['# Project', '', 'See <a href="docs/missing.md">the guide</a>.'].join('\n'),
+    });
+
+    const result = runCli(root, ['--json', 'README.md']);
+    const document = parseJson(result.stdout);
+    expect(result.status).toBe(1);
+    expect(document.summary).toEqual({ filesChecked: 1, broken: 1, externalSkipped: 0 });
+    expect(document.diagnostics).toEqual([
+      {
+        file: 'README.md',
+        line: 3,
+        column: 5,
+        kind: 'link',
+        target: 'docs/missing.md',
+        reason: 'target does not exist',
+      },
+    ]);
+  });
+
+  it('text and JSON modes agree for raw HTML findings', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': [
+        '<a id="section"></a>',
+        '<a href="docs/missing.md">link</a>',
+        '<img src="assets/missing.png">',
+        '<a href="#missing-anchor">anchor</a>',
+        '<a href="https://example.com/x">external</a>',
+      ].join('\n'),
+    });
+
+    const text = runCli(root, ['README.md']);
+    const json = runCli(root, ['--json', 'README.md']);
+    const document = parseJson(json.stdout);
+    const lines = text.stdout.trimEnd().split('\n');
+    const summary = lines.pop();
+    const findings = lines.map((line) => {
+      const match = /^(.*):(\d+): (.*) — (.*)$/.exec(line);
+      return {
+        file: match?.[1] ?? '',
+        line: Number(match?.[2] ?? 0),
+        target: match?.[3] ?? '',
+        reason: match?.[4] ?? '',
+      };
+    });
+
+    expect(text.status).toBe(1);
+    expect(json.status).toBe(1);
+    expect(findings).toEqual(
+      document.diagnostics.map(({ file, line, target, reason }) => ({
+        file,
+        line,
+        target,
+        reason,
+      })),
+    );
+    expect(document.summary).toEqual({ filesChecked: 1, broken: 3, externalSkipped: 1 });
+    expect(summary).toBe('Checked 1 file: 3 broken targets, 1 external link skipped.');
+  });
+
+  it('text and JSON modes agree for raw HTML external counts', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': [
+        '<a href="https://example.com/one">one</a>',
+        '<img src="http://example.com/two.png">',
+        '<a href="https://example.com/three">three</a>',
+      ].join('\n'),
+    });
+
+    const text = runCli(root, ['README.md']);
+    const json = runCli(root, ['--json', 'README.md']);
+    const document = parseJson(json.stdout);
+
+    expect(text.status).toBe(0);
+    expect(json.status).toBe(0);
+    expect(/(\d+) external links skipped/.exec(text.stdout)?.[1]).toBe('3');
+    expect(document.summary).toEqual({ filesChecked: 1, broken: 0, externalSkipped: 3 });
+  });
+
+  it('existing Markdown fixture behavior remains unchanged', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': [
+        '# Project',
+        '',
+        '[guide](docs/guide.md), [missing](docs/missing.md), ![logo](assets/logo.png), [web](https://example.com/guide), [same](#project)',
+      ].join('\n'),
+      'docs/guide.md': '# Guide',
+      'assets/logo.png': '',
+    });
+
+    const text = runCli(root, ['README.md']);
+    const json = runCli(root, ['--json', 'README.md']);
+    const document = parseJson(json.stdout);
+
+    expect(text.status).toBe(1);
+    expect(text.stdout).toBe(
+      [
+        'README.md:3: docs/missing.md — target does not exist',
+        'Checked 1 file: 1 broken target, 1 external link skipped.',
+        '',
+      ].join('\n'),
+    );
+    expect(document.summary).toEqual({ filesChecked: 1, broken: 1, externalSkipped: 1 });
+    expect(document.diagnostics).toEqual([
+      {
+        file: 'README.md',
+        line: 3,
+        column: 25,
+        kind: 'link',
+        target: 'docs/missing.md',
+        reason: 'target does not exist',
+      },
+    ]);
+  });
+});

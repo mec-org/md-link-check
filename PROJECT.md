@@ -35,7 +35,7 @@ The repository owner and their own documentation repos. It runs locally and in C
 
 v0.2 retains all v0.1 behavior and supported Markdown forms, as defined by the v0.1 scope, and adds exactly three capabilities:
 
-- **Explicit HTML anchors and raw HTML targets:** recognize <a id="…"> and <a name="…"> as anchor targets, and check raw HTML <a href="…"> links and <img src="…"> images by the same local-target and external-target rules used for Markdown.
+- **Explicit HTML anchors and raw HTML targets:** recognize `<a id="…">` and `<a name="…">` as anchor targets, and check raw HTML `<a href="…">` links and `<img src="…">` images by the same local-target and external-target rules used for Markdown.
 - **Opt-in external URLs:** `--external` checks HTTP and HTTPS targets using Node's built-in `fetch`. The default remains fully offline and counts external URLs as skipped. External checking has finite timeouts, bounded concurrency, per-host politeness, bounded retries and a persistent result cache. Node's built-in `fetch`, with no runtime dependency, is an irreversible implementation decision.
 - **GitHub Action:** root-level action metadata and a checked-in action entrypoint wrap the CLI and can be consumed from a tagged ref of this repository without an npm release or a repository workflow.
 

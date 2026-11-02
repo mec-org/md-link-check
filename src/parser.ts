@@ -59,6 +59,56 @@ export interface MarkdownScan {
   readonly definitions: ReadonlyMap<string, ReferenceDefinition>;
 }
 
+/** An explicit anchor target declared by `<a id="…">` or `<a name="…">`. */
+export interface HtmlAnchorTarget {
+  /** The value as written, without surrounding quotes. */
+  value: string;
+  /** 1-based line number of the opening tag. */
+  line: number;
+}
+
+/** A raw HTML link or image target found in a supported tag. */
+export interface HtmlTargetReference {
+  kind: LinkKind;
+  /** The value of `href` or `src` as written, without surrounding quotes. */
+  target: string;
+  /** 1-based line number of the opening tag. */
+  line: number;
+  /** 1-based column number of the opening `<` of the tag. */
+  column: number;
+}
+
+/** The result of scanning the supported raw HTML forms in one document. */
+export interface HtmlScan {
+  /** Explicit anchor targets in document order. */
+  readonly anchors: readonly HtmlAnchorTarget[];
+  /** Raw HTML link and image targets in document order. */
+  readonly references: readonly HtmlTargetReference[];
+}
+
+/** One HTML tag found on a single line. */
+interface HtmlTag {
+  /** Lowercased tag name. */
+  name: string;
+  /** 0-based index of the line that contains the tag. */
+  lineIndex: number;
+  /** 0-based index of the opening `<`. */
+  start: number;
+  /** 0-based index of the closing `>`. */
+  end: number;
+  /** Attribute value ranges; the first occurrence of a name wins. */
+  attributes: ReadonlyMap<string, HtmlAttributeRange | null>;
+}
+
+/** A half-open value range inside a tag, excluding surrounding quotes. */
+interface HtmlAttributeRange {
+  start: number;
+  end: number;
+}
+
+/** HTML tags that M4 supports; other raw HTML is not scanned. */
+const SUPPORTED_HTML_TAGS = new Set(['a', 'img']);
+
 interface ParsedLink {
   target: string;
   end: number;
@@ -95,12 +145,15 @@ const DEFINITION_START = /^( {0,3})\[/;
  *
  * Fenced code blocks, indented code blocks and inline code spans are masked
  * before scanning, so syntax inside them is ignored. Reference definitions are
- * never returned as inline links or shortcut uses. Raw HTML and autolinks are
- * outside the supported scope.
+ * never returned as inline links or shortcut uses. Supported raw HTML tags
+ * (`<a …>` and `<img …>`) are masked too, so link syntax inside their attribute
+ * values is not read as Markdown. Autolinks and unsupported raw HTML are
+ * outside scope; see `scanHtml` for the supported raw HTML forms.
  */
 export function scanMarkdown(markdown: string): MarkdownScan {
   const lines = markdown.split(/\r?\n/);
-  const { masked: maskedLines } = maskCodeLines(lines);
+  const { masked: codeMaskedLines } = maskCodeLines(lines);
+  const maskedLines = maskSupportedHtmlTags(codeMaskedLines, findHtmlTags(codeMaskedLines));
   const definitions = new Map<string, ReferenceDefinition>();
   const definitionLines = new Set<number>();
 
@@ -204,6 +257,60 @@ export function scanInlineReferences(markdown: string): InlineReference[] {
 }
 
 /**
+ * Finds the supported raw HTML forms: explicit anchors from `<a id="…">` and
+ * `<a name="…">`, links from `<a href="…">`, and images from `<img src="…">`.
+ *
+ * Tag and attribute names are matched ASCII case-insensitively, attributes may
+ * appear in any order, and values may be double-quoted, single-quoted or
+ * unquoted. The first syntactically valid occurrence of a duplicated relevant
+ * attribute on one tag wins. Values are kept literally, so HTML entities,
+ * percent-encoding, Unicode normalization and repeated explicit anchor names
+ * are not interpreted. Empty values are ignored.
+ *
+ * Fenced code blocks, indented code blocks and inline code spans are masked
+ * with the same exclusions `scanMarkdown` uses, so supported-looking tags inside
+ * them are not found. Tags must be closed on the same line; an unclosed tag and
+ * malformed attribute syntax are ignored. Other raw HTML is not scanned.
+ */
+export function scanHtml(markdown: string): HtmlScan {
+  const lines = markdown.split(/\r?\n/);
+  const { masked: codeMaskedLines } = maskCodeLines(lines);
+  const anchors: HtmlAnchorTarget[] = [];
+  const references: HtmlTargetReference[] = [];
+
+  for (const tag of findHtmlTags(codeMaskedLines)) {
+    const line = tag.lineIndex + 1;
+    const column = tag.start + 1;
+    const original = lines[tag.lineIndex] ?? '';
+
+    if (tag.name === 'a') {
+      const id = attributeValue(tag, original, 'id');
+      if (id !== null) {
+        anchors.push({ value: id, line });
+      }
+      const name = attributeValue(tag, original, 'name');
+      if (name !== null) {
+        anchors.push({ value: name, line });
+      }
+      const href = attributeValue(tag, original, 'href');
+      if (href !== null) {
+        references.push({ kind: 'link', target: href, line, column });
+      }
+      continue;
+    }
+
+    if (tag.name === 'img') {
+      const src = attributeValue(tag, original, 'src');
+      if (src !== null) {
+        references.push({ kind: 'image', target: src, line, column });
+      }
+    }
+  }
+
+  return { anchors, references };
+}
+
+/**
  * Masks fenced code blocks, indented code blocks and inline code spans with
  * spaces, preserving line count and column positions. Link scanning and heading
  * collection share this single code-exclusion interpretation.
@@ -250,6 +357,253 @@ export function maskCodeLines(lines: readonly string[]): MaskedLines {
   }
 
   return { masked, codeBlock };
+}
+
+/**
+ * Finds every HTML-like opening tag on the code-masked lines. A `<` starts a tag
+ * only when an ASCII letter follows; scanning resumes after each tag's closing
+ * `>`, so a quote-aware tag boundary never scans beyond it.
+ */
+function findHtmlTags(maskedLines: readonly string[]): HtmlTag[] {
+  const tags: HtmlTag[] = [];
+
+  for (let lineIndex = 0; lineIndex < maskedLines.length; lineIndex += 1) {
+    const line = maskedLines[lineIndex] ?? '';
+    let index = 0;
+
+    while (index < line.length) {
+      const start = line.indexOf('<', index);
+      if (start === -1) {
+        break;
+      }
+      const tag = parseHtmlTag(line, lineIndex, start);
+      if (tag === null) {
+        index = start + 1;
+        continue;
+      }
+      tags.push(tag);
+      index = tag.end + 1;
+    }
+  }
+
+  return tags;
+}
+
+/**
+ * Parses one opening tag from `<` to the matching `>` on the same line. A `>`
+ * inside a quoted attribute value does not end the tag.
+ */
+function parseHtmlTag(line: string, lineIndex: number, start: number): HtmlTag | null {
+  let cursor = start + 1;
+  if (!isAsciiLetter(line.charAt(cursor))) {
+    return null;
+  }
+
+  const nameStart = cursor;
+  cursor += 1;
+  while (cursor < line.length && isHtmlTagNameCharacter(line.charAt(cursor))) {
+    cursor += 1;
+  }
+  const name = line.slice(nameStart, cursor).toLowerCase();
+  const attributesStart = cursor;
+
+  let quote: string | null = null;
+  while (cursor < line.length) {
+    const character = line.charAt(cursor);
+    if (quote !== null) {
+      if (character === quote) {
+        quote = null;
+      }
+      cursor += 1;
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      cursor += 1;
+      continue;
+    }
+    if (character === '>') {
+      return {
+        name,
+        lineIndex,
+        start,
+        end: cursor,
+        attributes: parseHtmlAttributes(line, attributesStart, cursor),
+      };
+    }
+    cursor += 1;
+  }
+
+  return null;
+}
+
+/**
+ * Parses the attributes between a tag name and its closing `>`. Attribute names
+ * are compared as complete names, so `data-href`, `srcset` and `name-extra` are
+ * not the supported attributes. The first occurrence of a duplicated name wins.
+ */
+function parseHtmlAttributes(
+  line: string,
+  start: number,
+  end: number,
+): ReadonlyMap<string, HtmlAttributeRange | null> {
+  const attributes = new Map<string, HtmlAttributeRange | null>();
+  let cursor = start;
+
+  while (cursor < end) {
+    while (cursor < end && isHtmlWhitespace(line.charAt(cursor))) {
+      cursor += 1;
+    }
+    if (cursor >= end) {
+      break;
+    }
+    if (line.charAt(cursor) === '/') {
+      cursor += 1;
+      continue;
+    }
+    if (!isHtmlAttributeNameStartCharacter(line.charAt(cursor))) {
+      cursor += 1;
+      continue;
+    }
+
+    const nameStart = cursor;
+    cursor += 1;
+    while (cursor < end && isHtmlAttributeNameCharacter(line.charAt(cursor))) {
+      cursor += 1;
+    }
+    const name = line.slice(nameStart, cursor).toLowerCase();
+
+    let equalCursor = cursor;
+    while (equalCursor < end && isHtmlWhitespace(line.charAt(equalCursor))) {
+      equalCursor += 1;
+    }
+    if (line.charAt(equalCursor) !== '=') {
+      if (!attributes.has(name)) {
+        attributes.set(name, null);
+      }
+      continue;
+    }
+
+    cursor = equalCursor + 1;
+    while (cursor < end && isHtmlWhitespace(line.charAt(cursor))) {
+      cursor += 1;
+    }
+
+    const quote = line.charAt(cursor);
+    let range: HtmlAttributeRange | null = null;
+    if (quote === '"' || quote === "'") {
+      const valueStart = cursor + 1;
+      const closing = line.indexOf(quote, valueStart);
+      if (closing !== -1 && closing < end) {
+        range = { start: valueStart, end: closing };
+        cursor = closing + 1;
+      } else {
+        cursor = end;
+      }
+    } else if (cursor < end) {
+      const valueStart = cursor;
+      while (cursor < end && !isHtmlWhitespace(line.charAt(cursor))) {
+        cursor += 1;
+      }
+      range = { start: valueStart, end: cursor };
+    }
+
+    if (!attributes.has(name)) {
+      attributes.set(name, range);
+    }
+  }
+
+  return attributes;
+}
+
+/**
+ * Reads a supported attribute from the original line. The code-masked line
+ * supplied positions, which are preserved, so inline code inside an HTML
+ * attribute does not change the value text. Absent, valueless and empty values
+ * read as null.
+ */
+function attributeValue(tag: HtmlTag, line: string, name: string): string | null {
+  const range = tag.attributes.get(name);
+  if (range === undefined || range === null) {
+    return null;
+  }
+  const value = line.slice(range.start, range.end);
+  return value === '' ? null : value;
+}
+
+/** Replaces every supported `<a …>` or `<img …>` tag with spaces. */
+function maskSupportedHtmlTags(
+  maskedLines: readonly string[],
+  tags: readonly HtmlTag[],
+): readonly string[] {
+  const rangesByLine = new Map<number, Array<{ start: number; end: number }>>();
+  for (const tag of tags) {
+    if (!SUPPORTED_HTML_TAGS.has(tag.name)) {
+      continue;
+    }
+    const ranges = rangesByLine.get(tag.lineIndex);
+    const range = { start: tag.start, end: tag.end };
+    if (ranges === undefined) {
+      rangesByLine.set(tag.lineIndex, [range]);
+    } else {
+      ranges.push(range);
+    }
+  }
+  if (rangesByLine.size === 0) {
+    return maskedLines;
+  }
+
+  const masked = [...maskedLines];
+  for (const [lineIndex, ranges] of rangesByLine) {
+    const line = masked[lineIndex] ?? '';
+    let result = '';
+    let cursor = 0;
+    for (const range of ranges) {
+      result += line.slice(cursor, range.start);
+      result += ' '.repeat(range.end + 1 - range.start);
+      cursor = range.end + 1;
+    }
+    masked[lineIndex] = result + line.slice(cursor);
+  }
+  return masked;
+}
+
+function isAsciiLetter(character: string): boolean {
+  return (
+    (character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z')
+  );
+}
+
+function isAsciiDigit(character: string): boolean {
+  return character >= '0' && character <= '9';
+}
+
+function isHtmlTagNameCharacter(character: string): boolean {
+  return (
+    isAsciiLetter(character) ||
+    isAsciiDigit(character) ||
+    character === '-' ||
+    character === '_' ||
+    character === ':' ||
+    character === '.'
+  );
+}
+
+function isHtmlAttributeNameStartCharacter(character: string): boolean {
+  return isAsciiLetter(character) || character === '_' || character === ':';
+}
+
+function isHtmlAttributeNameCharacter(character: string): boolean {
+  return (
+    isHtmlAttributeNameStartCharacter(character) ||
+    isAsciiDigit(character) ||
+    character === '-' ||
+    character === '.'
+  );
+}
+
+function isHtmlWhitespace(character: string): boolean {
+  return character === ' ' || character === '\t' || character === '\f' || character === '\r';
 }
 
 /**

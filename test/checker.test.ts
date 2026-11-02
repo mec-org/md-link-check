@@ -734,3 +734,524 @@ describe('external skip counting', () => {
     }
   });
 });
+
+describe('explicit HTML anchors', () => {
+  it('accepts a same-file link to an explicit id anchor', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': ['<a id="section"></a>', '', '[jump](#section)'].join('\n'),
+    });
+
+    expect(check(root, 'README.md')).toEqual([]);
+  });
+
+  it('accepts a same-file link to an explicit name anchor', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': ['<a name="section"></a>', '', '[jump](#section)'].join('\n'),
+    });
+
+    expect(check(root, 'README.md')).toEqual([]);
+  });
+
+  it('reports a missing same-file explicit anchor', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': ['<a id="section"></a>', '', '[jump](#missing)'].join('\n'),
+    });
+
+    expect(check(root, 'README.md')).toEqual([
+      {
+        file: join(root, 'README.md'),
+        line: 3,
+        column: 1,
+        kind: 'link',
+        target: '#missing',
+        reason: 'anchor does not exist',
+      },
+    ]);
+  });
+
+  it('Markdown links resolve to explicit HTML anchors', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': [
+        '# Project',
+        '',
+        '[id anchor](#section) and [name anchor](#other)',
+        '',
+        '<a id="section"></a>',
+        '<a name="other"></a>',
+      ].join('\n'),
+    });
+
+    expect(check(root, 'README.md')).toEqual([]);
+  });
+
+  it('raw HTML links resolve to Markdown heading anchors', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': ['# Installation', '', '<a href="#installation">jump</a>'].join('\n'),
+    });
+
+    expect(check(root, 'README.md')).toEqual([]);
+  });
+
+  it('matches an explicit anchor with the existing fragment-comparison rules', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': [
+        '<a id="My Section"></a>',
+        '',
+        '[same file](#My%20Section) and [another file](docs/guide.md#My%20Section)',
+      ].join('\n'),
+      'docs/guide.md': '<a name="My Section"></a>',
+    });
+
+    expect(check(root, 'README.md')).toEqual([]);
+  });
+
+  it('raw HTML links resolve to explicit HTML anchors', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': [
+        '<a id="section"></a>',
+        '',
+        '<a href="#section">jump</a>',
+        '<a href="#missing">broken</a>',
+      ].join('\n'),
+    });
+
+    expect(check(root, 'README.md').map((diagnostic) => diagnostic.target)).toEqual(['#missing']);
+  });
+});
+
+describe('cross-file explicit HTML anchors', () => {
+  it('accepts a cross-file link to an explicit id anchor', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': '<a href="docs/guide.md#section">guide</a>',
+      'docs/guide.md': '<a id="section"></a>',
+    });
+
+    expect(check(root, 'README.md')).toEqual([]);
+  });
+
+  it('accepts a cross-file link to an explicit name anchor', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': '<a href="docs/guide.md#section">guide</a>',
+      'docs/guide.md': '<a name="section"></a>',
+    });
+
+    expect(check(root, 'README.md')).toEqual([]);
+  });
+
+  it('reports a missing cross-file explicit anchor', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': '<a href="docs/guide.md#deployment">guide</a>',
+      'docs/guide.md': '<a id="section"></a>',
+    });
+
+    expect(check(root, 'README.md')).toEqual([
+      {
+        file: join(root, 'README.md'),
+        line: 1,
+        column: 1,
+        kind: 'link',
+        target: 'docs/guide.md#deployment',
+        reason: 'anchor does not exist',
+      },
+    ]);
+  });
+
+  it('resolves an explicit anchor in the target Markdown file', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': ['# Project', '', '[details](docs/guide.md#section)'].join('\n'),
+      'docs/guide.md': ['# Guide', '', '<a name="section"></a>'].join('\n'),
+    });
+
+    expect(check(root, 'README.md')).toEqual([]);
+  });
+
+  it('does not leak explicit anchors between Markdown files', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': '[first](a.md#section) and [second](b.md#section)',
+      'a.md': '<a id="section"></a>',
+      'b.md': '# B',
+    });
+
+    expect(check(root, 'README.md').map((diagnostic) => diagnostic.target)).toEqual([
+      'b.md#section',
+    ]);
+  });
+
+  it('missing target file does not also report a missing anchor', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': '<a href="docs/missing.md#section">guide</a>',
+    });
+
+    expect(check(root, 'README.md')).toEqual([
+      {
+        file: join(root, 'README.md'),
+        line: 1,
+        column: 1,
+        kind: 'link',
+        target: 'docs/missing.md#section',
+        reason: 'target does not exist',
+      },
+    ]);
+  });
+});
+
+describe('raw HTML target checking', () => {
+  it('accepts an existing relative raw HTML link target', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': '<a href="docs/guide.md">the guide</a>',
+      'docs/guide.md': '# Guide',
+    });
+
+    expect(check(root, 'README.md')).toEqual([]);
+  });
+
+  it('reports a missing relative raw HTML link target', () => {
+    const root = makeTempRoot();
+    writeFiles(root, { 'README.md': 'See <a href="docs/missing.md">the guide</a>.' });
+
+    expect(check(root, 'README.md')).toEqual([
+      {
+        file: join(root, 'README.md'),
+        line: 1,
+        column: 5,
+        kind: 'link',
+        target: 'docs/missing.md',
+        reason: 'target does not exist',
+      },
+    ]);
+  });
+
+  it('accepts an existing relative raw HTML image target', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': '<img src="assets/logo.png" alt="Logo">',
+      'assets/logo.png': '',
+    });
+
+    expect(check(root, 'README.md')).toEqual([]);
+  });
+
+  it('reports a missing relative raw HTML image target', () => {
+    const root = makeTempRoot();
+    writeFiles(root, { 'README.md': '<img src="assets/missing.png">' });
+
+    expect(check(root, 'README.md')).toEqual([
+      {
+        file: join(root, 'README.md'),
+        line: 1,
+        column: 1,
+        kind: 'image',
+        target: 'assets/missing.png',
+        reason: 'target does not exist',
+      },
+    ]);
+  });
+
+  it('resolves raw HTML targets relative to the source Markdown file', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': ['# Project', '', '[guide](docs/guide.md)'].join('\n'),
+      'docs/guide.md': [
+        '# Guide',
+        '',
+        '<a href="../README.md#project">home</a> and <img src="../assets/logo.png">',
+      ].join('\n'),
+      'assets/logo.png': '',
+    });
+
+    expect(check(root, 'README.md', 'docs/guide.md')).toEqual([]);
+  });
+
+  it('ignores unsupported raw HTML attributes and targets', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': [
+        '<div href="missing.md"><span src="missing.png"></span></div>',
+        '<video src="missing.mp4" poster="missing.jpg"></video>',
+        '<img srcset="missing.png 1x, other.png 2x">',
+        '<a data-href="missing.md" name-extra="section"></a>',
+      ].join('\n'),
+    });
+
+    const checked = result(root, 'README.md');
+    expect(checked.diagnostics).toEqual([]);
+    expect(checked.externalSkipped).toBe(0);
+  });
+
+  it('skips a raw HTML external link', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': '<a href="https://example.com/guide">web</a>',
+    });
+
+    const checked = result(root, 'README.md');
+    expect(checked.diagnostics).toEqual([]);
+    expect(checked.externalSkipped).toBe(1);
+  });
+
+  it('skips a raw HTML external image', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': '<img src="https://example.com/diagram.png">',
+    });
+
+    const checked = result(root, 'README.md');
+    expect(checked.diagnostics).toEqual([]);
+    expect(checked.externalSkipped).toBe(1);
+  });
+
+  it('counts each skipped raw HTML external use once', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': [
+        '<a href="https://example.com/one">one</a>',
+        '<a id="section" name="section" href="http://example.com/two">two</a>',
+        '<img src="https://example.com/logo.png">',
+      ].join('\n'),
+    });
+
+    const checked = result(root, 'README.md');
+    expect(checked.diagnostics).toEqual([]);
+    expect(checked.externalSkipped).toBe(3);
+  });
+
+  it('preserves the raw HTML target and source line in diagnostics', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': [
+        '# Project',
+        '',
+        '<a href="docs/missing.md#installation">details</a>',
+      ].join('\n'),
+    });
+
+    expect(check(root, 'README.md')).toEqual([
+      {
+        file: join(root, 'README.md'),
+        line: 3,
+        column: 1,
+        kind: 'link',
+        target: 'docs/missing.md#installation',
+        reason: 'target does not exist',
+      },
+    ]);
+  });
+
+  it('does not fetch external raw HTML targets', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': [
+        '<a href="https://192.0.2.1/unreachable">link</a>',
+        '<img src="http://192.0.2.2/also-unreachable.png">',
+      ].join('\n'),
+    });
+
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = (() => {
+      fetchCalls += 1;
+      throw new Error('network access attempted');
+    }) as typeof fetch;
+    try {
+      const checked = result(root, 'README.md');
+      expect(checked.externalSkipped).toBe(2);
+      expect(fetchCalls).toBe(0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe('raw HTML code exclusions', () => {
+  it('ignores explicit HTML anchors inside fenced code', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': [
+        '# Real',
+        '',
+        '```html',
+        '<a id="fake"></a>',
+        '```',
+        '',
+        '[jump](#fake)',
+      ].join('\n'),
+    });
+
+    expect(check(root, 'README.md').map(({ line, target }) => ({ line, target }))).toEqual([
+      { line: 7, target: '#fake' },
+    ]);
+  });
+
+  it('ignores raw HTML links inside fenced code', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': [
+        '# Real',
+        '',
+        '```html',
+        '<a href="missing.md">fake</a>',
+        '```',
+        '',
+        '[real](#real)',
+      ].join('\n'),
+    });
+
+    expect(check(root, 'README.md')).toEqual([]);
+  });
+
+  it('ignores raw HTML images inside fenced code', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': [
+        '# Real',
+        '',
+        '~~~html',
+        '<img src="missing.png">',
+        '~~~',
+        '',
+        '[real](#real)',
+      ].join('\n'),
+    });
+
+    expect(check(root, 'README.md')).toEqual([]);
+  });
+
+  it('ignores explicit HTML anchors inside indented code', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': ['# Real', '', '    <a id="fake"></a>', '', '[jump](#fake)'].join('\n'),
+    });
+
+    expect(check(root, 'README.md').map(({ line, target }) => ({ line, target }))).toEqual([
+      { line: 5, target: '#fake' },
+    ]);
+  });
+
+  it('ignores raw HTML links inside indented code', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': [
+        '# Real',
+        '',
+        '    <a href="missing.md">fake</a>',
+        '',
+        '[real](#real)',
+      ].join('\n'),
+    });
+
+    expect(check(root, 'README.md')).toEqual([]);
+  });
+
+  it('ignores raw HTML images inside indented code', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': ['# Real', '', '    <img src="missing.png">', '', '[real](#real)'].join('\n'),
+    });
+
+    expect(check(root, 'README.md')).toEqual([]);
+  });
+
+  it('ignores explicit HTML anchors inside inline code', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': [
+        '# Real',
+        '',
+        'Use `<a id="fake"></a>` in prose.',
+        '',
+        '[jump](#fake)',
+      ].join('\n'),
+    });
+
+    expect(check(root, 'README.md').map(({ line, target }) => ({ line, target }))).toEqual([
+      { line: 5, target: '#fake' },
+    ]);
+  });
+
+  it('ignores raw HTML links inside inline code', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': [
+        '# Real',
+        '',
+        'Use `<a href="missing.md">fake</a>` in prose.',
+        '',
+        '[real](#real)',
+      ].join('\n'),
+    });
+
+    expect(check(root, 'README.md')).toEqual([]);
+  });
+
+  it('ignores raw HTML images inside inline code', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': [
+        '# Real',
+        '',
+        'Use `<img src="missing.png">` in prose.',
+        '',
+        '[real](#real)',
+      ].join('\n'),
+    });
+
+    expect(check(root, 'README.md')).toEqual([]);
+  });
+
+  it('a fake explicit anchor inside code does not satisfy a link', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': [
+        '# Real',
+        '',
+        '```html',
+        '<a id="fenced"></a>',
+        '```',
+        '',
+        'Use `<a id="inline"></a>` in prose.',
+        '',
+        '[fenced link](#fenced) and <a href="#inline">inline link</a>',
+      ].join('\n'),
+    });
+
+    expect(check(root, 'README.md').map(({ line, target }) => ({ line, target }))).toEqual([
+      { line: 9, target: '#fenced' },
+      { line: 9, target: '#inline' },
+    ]);
+  });
+
+  it('external raw HTML inside code does not affect skipped count', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': [
+        '<a href="https://example.com/real">real</a>',
+        '',
+        '```html',
+        '<a href="https://example.com/fenced">fenced</a>',
+        '```',
+        '',
+        '    <img src="https://example.com/indented.png">',
+        '',
+        'Use `<a href="https://example.com/inline">inline</a>` in prose.',
+      ].join('\n'),
+    });
+
+    const checked = result(root, 'README.md');
+    expect(checked.diagnostics).toEqual([]);
+    expect(checked.externalSkipped).toBe(1);
+  });
+});

@@ -4,7 +4,7 @@ md-link-check is an offline CLI that finds broken relative links, images and hea
 
 See [PROJECT.md](PROJECT.md) for the charter, [ROADMAP.md](ROADMAP.md) for the milestones and [CONTRIBUTING.md](CONTRIBUTING.md) for who may open issues and pull requests.
 
-> **Status: v0.1's checks and the M4 raw HTML forms are implemented.** Inline and reference-style links and images, heading anchors, explicit `<a id>`/`<a name>` anchors, raw HTML `<a href>` links and `<img src>` images, stable text output, `--json` and the documented exit codes are implemented. The later v0.2 milestones (opt-in external checking and the GitHub Action) are not implemented yet. The release decision is the owner's. See [Current limitations](#current-limitations).
+> **Status: v0.1's checks, the M4 raw HTML forms and the M5 opt-in external checking contract are implemented.** Inline and reference-style links and images, heading anchors, explicit `<a id>`/`<a name>` anchors, raw HTML `<a href>` links and `<img src>` images, stable text output, `--json`, the documented exit codes and `--external` network checking are implemented. The later v0.2 milestones (M6 transport hardening with per-host politeness and a persistent result cache, and the M7 GitHub Action) are not implemented yet. The release decision is the owner's. See [Current limitations](#current-limitations).
 
 ## Requirements
 
@@ -23,7 +23,7 @@ npm run build
 ## Usage
 
 ```bash
-md-link-check [--json] [--] <path...>
+md-link-check [--json] [--external] [--] <path...>
 md-link-check --help
 node dist/cli.js README.md docs/    # without npm link
 ```
@@ -33,8 +33,11 @@ Pass one or more files or directories. An explicit file is checked as given, eve
 Options:
 
 - `--json` writes one JSON document to standard output instead of text output;
+- `--external` opts in to network checking of `http:` and `https:` targets with Node's built-in `fetch`. Without it, external targets are counted as skipped and the tool makes no network requests; see [Opt-in external checking](#opt-in-external-checking);
 - `--help` (or `-h`) prints usage and the exit codes and exits `0`;
 - `--` ends option parsing, so a path beginning with `-` can be checked.
+
+`--json` and `--external` may be repeated; repeated flags are accepted idempotently.
 
 Text mode writes diagnostics and a final summary to standard output. Usage errors are written to standard error. With `--json`, a check run writes only the JSON document to standard output. `--help` always prints the help text to standard output and exits `0`, even when `--json` is also given. The process exit code is the same in both modes.
 
@@ -62,6 +65,13 @@ A summary line follows the diagnostics, including when nothing is broken and whe
 Checked 2 files: 1 broken target, 3 external links skipped.
 ```
 
+With `--external`, checked external occurrences are not labeled skipped, and a second summary line reports the external counts:
+
+```text
+Checked 1 file: 1 broken target, 0 external links skipped.
+External checks: 2 occurrences, 2 distinct targets checked (1 succeeded, 1 failed), 1 broken occurrence.
+```
+
 ## JSON output
 
 `--json` writes exactly one version 1 JSON document to standard output and nothing else. A clean run:
@@ -75,6 +85,16 @@ Checked 2 files: 1 broken target, 3 external links skipped.
     "filesChecked": 2,
     "broken": 0,
     "externalSkipped": 3
+  },
+  "external": {
+    "enabled": false,
+    "occurrences": 3,
+    "skipped": 3,
+    "distinctChecked": 0,
+    "succeeded": 0,
+    "failed": 0,
+    "brokenOccurrences": 0,
+    "results": []
   },
   "diagnostics": []
 }
@@ -91,6 +111,16 @@ A broken run fills `diagnostics` in deterministic order:
     "filesChecked": 2,
     "broken": 1,
     "externalSkipped": 3
+  },
+  "external": {
+    "enabled": false,
+    "occurrences": 3,
+    "skipped": 3,
+    "distinctChecked": 0,
+    "succeeded": 0,
+    "failed": 0,
+    "brokenOccurrences": 0,
+    "results": []
   },
   "diagnostics": [
     {
@@ -113,7 +143,8 @@ The properties are:
 - `error`: present only for a usage error; contains `kind` (`"usage"`) and `message`, and `diagnostics` is empty in that case;
 - `summary.filesChecked`: number of unique files checked;
 - `summary.broken`: number of diagnostics (broken targets and undefined reference uses);
-- `summary.externalSkipped`: number of skipped HTTP(S) link and image uses;
+- `summary.externalSkipped`: number of skipped HTTP(S) link and image uses; `0` when `--external` is enabled;
+- `external`: additive external-check summary and per-target results, present in every report; `enabled` is `false` when the run was offline. See [JSON additions](#json-additions);
 - `diagnostics`: ordered array of `{ file, line, column, kind, target, reason }` objects. `column` is one-based and points at the `[` or `!` of a Markdown reference, or at the `<` of a supported raw HTML tag; `kind` is `"link"` or `"image"`.
 
 A usage error keeps the same top-level shape: `ok` is `false`, `exitCode` is `2`, the summary counts are zero, `diagnostics` is empty, and the top-level `error` field describes the failure (`kind` is `"usage"`, `message` is the error). A usage error is never reported as a link diagnostic. For example:
@@ -131,6 +162,16 @@ A usage error keeps the same top-level shape: `ok` is `false`, `exitCode` is `2`
     "filesChecked": 0,
     "broken": 0,
     "externalSkipped": 0
+  },
+  "external": {
+    "enabled": false,
+    "occurrences": 0,
+    "skipped": 0,
+    "distinctChecked": 0,
+    "succeeded": 0,
+    "failed": 0,
+    "brokenOccurrences": 0,
+    "results": []
   },
   "diagnostics": []
 }
@@ -195,12 +236,12 @@ Tag and attribute names are matched case-insensitively. The relevant attribute m
 An `<a href>` or `<img src>` value is checked exactly like a Markdown link or image target:
 
 - a relative path is resolved from the containing Markdown file, including directory targets;
-- `http:` and `https:` targets are skipped, counted once per use and never fetched;
+- `http:` and `https:` targets are skipped and counted once per use by default; with `--external` they are checked once per distinct normalized target;
 - a fragment resolves against the heading anchors and explicit anchors of the same Markdown file or an existing relative Markdown file;
 - a missing file or anchor produces the existing `target does not exist` or `anchor does not exist` diagnostic and exit `1`;
 - the target is preserved as written, and the diagnostic line is the line containing the opening tag.
 
-These uses flow through the existing text and JSON reporters and exit codes: a document with only valid explicit anchors and raw HTML targets exits `0`, a broken raw HTML target or explicit anchor exits `1`, and usage errors remain exit `2`. Text diagnostics keep the `file:line: target — reason` form and the JSON schema is unchanged.
+These uses flow through the existing text and JSON reporters and exit codes: a document with only valid explicit anchors and raw HTML targets exits `0`, a broken raw HTML target or explicit anchor exits `1`, and usage errors remain exit `2`. Text diagnostics keep the `file:line: target — reason` form, and the JSON report keeps every existing field and adds the `external` object described in [JSON additions](#json-additions).
 
 Explicit anchors are literal and document-local: they augment heading-generated anchors, are not slugified, and never receive `-1`/`-2` suffixes. Repeated identical values resolve to the same anchor. An empty value such as `<a id="">` is not a usable anchor and produces no diagnostic by itself; an empty `href` or `src` value is ignored like an empty Markdown destination. When one `<a>` tag has both `id` and `name`, both non-empty values are collected.
 
@@ -221,18 +262,156 @@ Only those attributes on `<a>` and `<img>` are recognised. Other raw HTML remain
 
 HTML comments are not a distinct construct: supported-looking tags and ordinary Markdown link syntax inside them are scanned like the surrounding text. Ordinary Markdown link syntax inside other raw HTML is also still scanned as Markdown, as before. Supported raw HTML tags inside code are not scanned; see the code-exclusion rule below.
 
-These targets are skipped and never fetched:
+By default these targets are skipped and never fetched:
 
-- HTTP and HTTPS URLs, and other URI schemes such as `mailto:`;
+- HTTP and HTTPS URLs (checked only when `--external` is given), and other URI schemes such as `mailto:`;
 - root-relative targets such as `/docs/guide.md`.
 
 Fenced code blocks (backtick and tilde fences) and indented code blocks at the top level, and single-line inline code, are ignored by the scanner for links, images, reference definitions, headings and supported raw HTML tags, so examples inside them do not produce diagnostics, do not define references or anchors and are not counted as external uses.
 
 ## External link count
 
-`summary.externalSkipped` and the text summary count every encountered `http:` or `https:` link and image use that is skipped, including inline uses, resolved reference-style uses and supported raw HTML uses. The count is per use, not per unique destination, so the same URL used three times counts three. An unused external reference definition is not counted.
+Without `--external`, `summary.externalSkipped` and the text summary count every encountered `http:` or `https:` link and image use that is skipped, including inline uses, resolved reference-style uses and supported raw HTML uses. The count is per use, not per unique destination, so the same URL used three times counts three. An unused external reference definition is not counted.
 
-Other URI schemes (`mailto:`, `ftp:`), protocol-relative targets (`//example.com`) and root-relative targets are skipped but are not included in the HTTP(S) count. No destination is ever fetched, and the tool never opens a network connection.
+Other URI schemes (`mailto:`, `ftp:`), protocol-relative targets (`//example.com`) and root-relative targets are skipped but are not included in the HTTP(S) count. Without `--external`, no destination is fetched and the tool never opens a network connection.
+
+With `--external`, external occurrences are checked instead of skipped: `summary.externalSkipped` and the text `external links skipped` count are `0`, and the external summary counts in the text output and JSON describe what was checked. See [Opt-in external checking](#opt-in-external-checking).
+
+## Opt-in external checking
+
+`--external` is the only way the CLI performs network access. Without it, HTTP(S) targets are skipped and counted as above: the tool performs no request, no DNS lookup and no `fetch` call. With it, each distinct `http:` or `https:` target is checked with Node's built-in `fetch`; no fetch library and no runtime dependency are added.
+
+External checking is opt-in because it sends requests to the hosts named in the Markdown. Use it only when the run may access those hosts.
+
+### Occurrences, deduplication and shared results
+
+Every supported, non-code external occurrence is collected: inline Markdown links and images, resolved reference-style links and images, and raw HTML `<a href>` links and `<img src>` images. Unused reference definitions and external-looking text inside fenced, indented or inline code are not collected. Each occurrence keeps its source file, line, column, link or image kind, and the target exactly as written.
+
+Targets are deduplicated by the exact URL serialization produced by `new URL(target.trim()).href`: scheme and host normalization applies, while paths, queries and fragments are preserved, and `http:` and `https:` targets are never merged. The fragment is part of the deduplication key but is never sent in the HTTP request. One check is shared by every occurrence of that exact normalized target, even when the source spellings differ.
+
+If one distinct target fails, every supported source occurrence of it receives a diagnostic, while only one external check was performed. Diagnostics preserve the original target spelling at each source occurrence.
+
+If a target previously classified as HTTP(S) cannot be parsed by `new URL` (for example `http://`), it is reported as a failed external target without a request.
+
+### HTTP contract
+
+These are internal constants in M5, not CLI flags:
+
+- request method: `GET`, not `HEAD`;
+- redirects: followed using the built-in `fetch` default, and the final response after redirects is judged;
+- success: final status `200` through `399`;
+- failure: final status `400` through `599`, an exhausted timeout, or an exhausted network failure;
+- timeout: 5 seconds per attempt, through a fresh `AbortController` signal per attempt;
+- attempts: 2 total, the initial attempt plus one retry;
+- retried outcomes: network failures, timeouts, status `408`, status `429`, and status `500` through `599`;
+- not retried: other terminal 4xx responses;
+- retry delay: none;
+- concurrency: at most 4 distinct targets checked at once.
+
+A successful final response is not a broken link, including one reached through redirects or a retryable failure that later succeeds. Results and diagnostics are deterministic: distinct target results are ordered by first source occurrence, and diagnostics keep their existing file and document order regardless of response completion order. No partial output is written before all checks finish.
+
+The tool validates the HTTP outcome only. It does not crawl or recursively check fetched pages, validate page content, authenticate, persist cookies, configure a proxy, handle `robots.txt`, or cache results across CLI invocations. It does not send a custom user agent. M6 adds further transport hardening; M5 exposes no timeout, retry or concurrency flags.
+
+### Diagnostics
+
+Every failed source occurrence keeps the existing form `file:line: target — reason`. The reasons are stable and contain no error stacks, socket identifiers, absolute paths or secrets:
+
+- `external HTTP 404` for a terminal HTTP status;
+- `external HTTP 500 after 2 attempts` for a retried status that exhausted the attempts;
+- `external request timed out after 2 attempts`;
+- `external network failure after 2 attempts`;
+- `external invalid URL`.
+
+A successful distinct target produces no broken-link diagnostic.
+
+### Exit codes and text summary
+
+Exit codes keep their documented meanings:
+
+- `0`: checking completed and neither local nor enabled external broken links were found;
+- `1`: at least one local or enabled external broken link was reported;
+- `2`: usage error.
+
+Without `--external`, unreachable external targets remain skipped and do not change the exit status. With `--external`, failed external checks produce diagnostics and therefore exit `1`, while successful checks do not change an otherwise clean status. Network failures are findings, not usage errors. Usage errors, including an unknown option or no input paths, still exit `2` and perform no network access.
+
+The first text summary line keeps its pre-M5 form and meaning. With `--external`, checked occurrences are not labeled skipped, and a second line reports external occurrences, distinct targets checked, successes, failures and broken occurrences; see [Text output](#text-output).
+
+### JSON additions
+
+The JSON schema keeps `version` 1 and every existing top-level and nested field, name, type and meaning. A new top-level `external` object is always present. `enabled` records whether `--external` was supplied; without it, `occurrences` and `skipped` equal the existing skipped count and `results` is empty. With it, for example:
+
+```json
+{
+  "version": 1,
+  "ok": false,
+  "exitCode": 1,
+  "summary": {
+    "filesChecked": 1,
+    "broken": 2,
+    "externalSkipped": 0
+  },
+  "external": {
+    "enabled": true,
+    "occurrences": 3,
+    "skipped": 0,
+    "distinctChecked": 2,
+    "succeeded": 1,
+    "failed": 1,
+    "brokenOccurrences": 2,
+    "results": [
+      {
+        "target": "http://127.0.0.1:12345/ok",
+        "status": "succeeded",
+        "attempts": 1,
+        "httpStatus": 200,
+        "finalUrl": "http://127.0.0.1:12345/ok"
+      },
+      {
+        "target": "http://127.0.0.1:12345/not-found",
+        "status": "failed",
+        "attempts": 1,
+        "httpStatus": 404,
+        "finalUrl": "http://127.0.0.1:12345/not-found",
+        "failureKind": "http"
+      }
+    ]
+  },
+  "diagnostics": [
+    {
+      "file": "docs/guide.md",
+      "line": 12,
+      "column": 5,
+      "kind": "link",
+      "target": "http://127.0.0.1:12345/not-found",
+      "reason": "external HTTP 404"
+    },
+    {
+      "file": "docs/guide.md",
+      "line": 20,
+      "column": 3,
+      "kind": "image",
+      "target": "http://127.0.0.1:12345/not-found",
+      "reason": "external HTTP 404"
+    }
+  ]
+}
+```
+
+The external properties are:
+
+- `external.enabled`: whether external checking was enabled for this run;
+- `external.occurrences`: number of supported HTTP(S) source occurrences discovered;
+- `external.skipped`: occurrences skipped when checking is disabled; always `0` when it is enabled;
+- `external.distinctChecked`: number of distinct normalized targets checked;
+- `external.succeeded`, `external.failed`: distinct target outcomes;
+- `external.brokenOccurrences`: source occurrences reported as broken through failed targets;
+- `external.results`: one object per distinct checked target, in first-occurrence order, containing `target` (the normalized URL or the trimmed unparseable target), `status` (`succeeded` or `failed`), `attempts` (a number), `httpStatus` and `finalUrl` only when a response was received, and `failureKind` only for failures (`http`, `timeout`, `network` or `invalid-url`). No raw error objects are exposed.
+
+`summary.broken` remains the number of diagnostics, so external broken occurrences contribute to it when `--external` is enabled. Existing consumers can ignore `external` and every pre-M5 field keeps its name, type and meaning; the version is not incremented because the change is additive and optional. Usage-error JSON reports the requested `enabled` value with zero counts and an empty `results` array, and never claims that external checks ran. JSON mode writes exactly one document to standard output with no progress text.
+
+### Privacy and offline use
+
+With `--external`, each distinct external target receives a `GET` request, which reveals the target URL and the runner's IP address to that host and to network intermediaries, subject to their logging and rate limits. Do not enable it for private documents or in an environment that must stay offline. Omitting the flag keeps a run fully offline, so offline CI remains possible. The test suite never contacts the public internet: external-check tests use local loopback HTTP fixtures on ephemeral ports.
 
 ## CI
 
@@ -250,7 +429,7 @@ The CLI can run as a normal CI step after a build. The example below runs inside
 
 To check a different repository, check out md-link-check at a pinned commit into a subdirectory, build it there, and run `node md-link-check/dist/cli.js <path-to-that-repository>` from the job workspace.
 
-The step fails the job with exit `1` when a broken target is found and exit `2` on a usage error. Add `--json` and redirect standard output when a machine-readable report is needed as an artifact; the report is written before the process exits.
+The step fails the job with exit `1` when a broken target is found and exit `2` on a usage error. Add `--json` and redirect standard output when a machine-readable report is needed as an artifact; the report is written before the process exits. The example stays fully offline; add `--external` only when the job may access the network, because without it HTTP(S) targets are counted as skipped and never requested.
 
 ## Current limitations
 
@@ -269,7 +448,7 @@ The step fails the job with exit `1` when a broken target is found and exit `2` 
 - Backslash escapes are used while finding the end of a destination, but are not removed from the destination text before it is checked: `[x](docs/a\)b.md)` is checked for a file named `a\)b.md`.
 - An empty inline destination (`[x]()` or `![x]()`) is ignored. An empty reference definition destination (`[label]: <>`) makes every use resolve to an empty target, which is skipped.
 - YAML front matter is not recognised; link-like syntax inside it is scanned as ordinary Markdown.
-- HTTP(S) and other external targets are never fetched or validated.
+- Without `--external`, HTTP(S) and other external targets are never fetched. With `--external`, only the HTTP(S) URL outcome is validated: fetched page content, authentication, cookies, proxies, `robots.txt`, per-host politeness and cross-invocation caching are not implemented, and other URI schemes are still never fetched.
 
 ## Development
 
@@ -280,4 +459,4 @@ npm run build
 npm ls --omit=dev  # runtime dependency check: must be empty
 ```
 
-The package has no runtime dependencies; TypeScript and Vitest are development dependencies only.
+The package has no runtime dependencies; TypeScript and Vitest are development dependencies only. The test suite does not contact the public internet: tests that exercise real network behavior use local loopback HTTP fixtures on ephemeral ports, and the rest inject a fetch stub.

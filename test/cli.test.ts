@@ -270,6 +270,16 @@ describe('JSON output', () => {
       ok: true,
       exitCode: 0,
       summary: { filesChecked: 1, broken: 0, externalSkipped: 0 },
+      external: {
+        enabled: false,
+        occurrences: 0,
+        skipped: 0,
+        distinctChecked: 0,
+        succeeded: 0,
+        failed: 0,
+        brokenOccurrences: 0,
+        results: [],
+      },
       diagnostics: [],
     });
     expect(result.stderr).toBe('');
@@ -469,7 +479,7 @@ describe('exit codes and usage', () => {
     expect(result.status).toBe(2);
     expect(result.stdout).toBe('');
     expect(result.stderr).toContain('no input paths');
-    expect(result.stderr).toContain('Usage: md-link-check [--json] <path...>');
+    expect(result.stderr).toContain('Usage: md-link-check [--json] [--external] <path...>');
   });
 
   it('unknown option exits 2', () => {
@@ -497,7 +507,7 @@ describe('exit codes and usage', () => {
     const result = runCli(root, ['--help']);
     expect(result.status).toBe(0);
     expect(result.stderr).toBe('');
-    expect(result.stdout).toContain('md-link-check [--json] [--] <path...>');
+    expect(result.stdout).toContain('md-link-check [--json] [--external] [--] <path...>');
     expect(result.stdout).toContain('Exit codes:');
     expect(result.stdout).toContain('2  usage error');
   });

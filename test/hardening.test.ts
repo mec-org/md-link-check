@@ -37,7 +37,7 @@ interface JsonDocument {
   }>;
 }
 
-function captureRun(args: readonly string[]): CapturedRun {
+async function captureRun(args: readonly string[]): Promise<CapturedRun> {
   let stdout = '';
   let stderr = '';
   const io: CliIo = {
@@ -48,7 +48,7 @@ function captureRun(args: readonly string[]): CapturedRun {
       stderr += text;
     },
   };
-  const exitCode = run(args, io);
+  const exitCode = await run(args, io);
   return { exitCode, stdout, stderr };
 }
 
@@ -119,14 +119,14 @@ function writeDocsFixture(root: string): void {
 }
 
 describe('M3 end-to-end stability', () => {
-  it('docs-shaped fixture produces deterministic diagnostics', () => {
+  it('docs-shaped fixture produces deterministic diagnostics', async () => {
     const root = makeTempRoot();
     writeDocsFixture(root);
 
-    const firstText = captureRun([root]);
-    const secondText = captureRun([root]);
-    const firstJson = captureRun(['--json', root]);
-    const secondJson = captureRun(['--json', root]);
+    const firstText = await captureRun([root]);
+    const secondText = await captureRun([root]);
+    const firstJson = await captureRun(['--json', root]);
+    const secondJson = await captureRun(['--json', root]);
 
     expect(firstText.exitCode).toBe(1);
     expect(secondText).toEqual(firstText);
@@ -135,12 +135,12 @@ describe('M3 end-to-end stability', () => {
     expect(parseJson(firstJson.stdout).diagnostics).toHaveLength(3);
   });
 
-  it('text and JSON modes report equivalent findings', () => {
+  it('text and JSON modes report equivalent findings', async () => {
     const root = makeTempRoot();
     writeDocsFixture(root);
 
-    const text = captureRun([root]);
-    const json = captureRun(['--json', root]);
+    const text = await captureRun([root]);
+    const json = await captureRun(['--json', root]);
     const document = parseJson(json.stdout);
     const parsedText = parseTextOutput(text.stdout);
 
@@ -156,15 +156,15 @@ describe('M3 end-to-end stability', () => {
     expect(parsedText.summary).toEqual(document.summary);
   });
 
-  it('two identical runs preserve diagnostic order', () => {
+  it('two identical runs preserve diagnostic order', async () => {
     const root = makeTempRoot();
     writeFiles(root, {
       'a.md': '# A\n\n[one](one.md) and [two](two.md)',
       'b.md': '# B\n\n[three](three.md) and [four](four.md)',
     });
 
-    const first = captureRun(['--json', root]);
-    const second = captureRun(['--json', root]);
+    const first = await captureRun(['--json', root]);
+    const second = await captureRun(['--json', root]);
 
     expect(first.stdout).toBe(second.stdout);
     expect(parseJson(first.stdout).diagnostics.map((diagnostic) => diagnostic.target)).toEqual([
@@ -175,38 +175,38 @@ describe('M3 end-to-end stability', () => {
     ]);
   });
 
-  it('clean supported fixture exits 0', () => {
+  it('clean supported fixture exits 0', async () => {
     const root = makeTempRoot();
     writeFiles(root, {
       'README.md': '# Clean\n\n[guide](docs/guide.md), [same](#clean) and [web](https://example.com).',
       'docs/guide.md': '# Guide',
     });
 
-    const result = captureRun([root]);
+    const result = await captureRun([root]);
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe('Checked 2 files: 0 broken targets, 1 external link skipped.\n');
     expect(result.stderr).toBe('');
   });
 
-  it('broken supported fixture exits 1', () => {
+  it('broken supported fixture exits 1', async () => {
     const root = makeTempRoot();
     writeFiles(root, { 'README.md': '[missing](docs/missing.md)' });
 
-    const result = captureRun([root]);
+    const result = await captureRun([root]);
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain('docs/missing.md — target does not exist');
     expect(result.stderr).toBe('');
   });
 
-  it('usage error exits 2', () => {
-    const result = captureRun([]);
+  it('usage error exits 2', async () => {
+    const result = await captureRun([]);
     expect(result.exitCode).toBe(2);
     expect(result.stdout).toBe('');
     expect(result.stderr).toContain('no input paths');
   });
 
-  it('json usage error is valid JSON with exit 2', () => {
-    const result = captureRun(['--json']);
+  it('json usage error is valid JSON with exit 2', async () => {
+    const result = await captureRun(['--json']);
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toBe('');
 
@@ -217,7 +217,7 @@ describe('M3 end-to-end stability', () => {
     expect(document.diagnostics).toEqual([]);
   });
 
-  it('external links are counted without calling fetch', () => {
+  it('external links are counted without calling fetch', async () => {
     const root = makeTempRoot();
     writeFiles(root, {
       'README.md': [
@@ -234,7 +234,7 @@ describe('M3 end-to-end stability', () => {
       throw new Error('network access attempted');
     }) as typeof fetch;
     try {
-      const result = captureRun(['--json', root]);
+      const result = await captureRun(['--json', root]);
       expect(result.exitCode).toBe(0);
       expect(parseJson(result.stdout).summary.externalSkipped).toBe(2);
       expect(fetchCalls).toBe(0);
@@ -243,21 +243,28 @@ describe('M3 end-to-end stability', () => {
     }
   });
 
-  it('source contains no network client imports', () => {
+  it('source uses only the injected fetch abstraction and no network clients', async () => {
     const sourceDirectory = fileURLToPath(new URL('../src/', import.meta.url));
     const sources = readdirSync(sourceDirectory, { recursive: true, encoding: 'utf8' })
       .filter((name) => name.endsWith('.ts'))
-      .map((name) => readFileSync(join(sourceDirectory, name), 'utf8'));
+      .map((name) => ({ name, source: readFileSync(join(sourceDirectory, name), 'utf8') }));
 
-    for (const source of sources) {
+    for (const { source } of sources) {
       expect(source).not.toMatch(/from ['"]node:(?:http|https|http2|net|dns|tls|dgram)['"]/);
       expect(source).not.toMatch(/\brequire\s*\(/);
       expect(source).not.toMatch(/\bimport\s*\(/);
-      expect(source).not.toMatch(/\bfetch\s*\(/);
     }
+
+    // M5's only network access is the production default for the injected
+    // fetch function; no other source file may reach for the global.
+    expect(
+      sources
+        .filter(({ source }) => /\bglobalThis\.fetch\b/.test(source))
+        .map(({ name }) => name),
+    ).toEqual(['external.ts']);
   });
 
-  it('package has no runtime dependencies', () => {
+  it('package has no runtime dependencies', async () => {
     const packageJson = JSON.parse(
       readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
     ) as {
@@ -273,7 +280,7 @@ describe('M3 end-to-end stability', () => {
 });
 
 describe('M3 supported-form hardening', () => {
-  it('inline links images references and anchors coexist in one document', () => {
+  it('inline links images references and anchors coexist in one document', async () => {
     const root = makeTempRoot();
     writeFiles(root, {
       'README.md': [
@@ -296,7 +303,7 @@ describe('M3 supported-form hardening', () => {
     expect(result.externalSkipped).toBe(1);
   });
 
-  it('same-file and cross-file anchors coexist with file targets', () => {
+  it('same-file and cross-file anchors coexist with file targets', async () => {
     const root = makeTempRoot();
     writeFiles(root, {
       'README.md': [
@@ -316,7 +323,7 @@ describe('M3 supported-form hardening', () => {
     expect(result.externalSkipped).toBe(0);
   });
 
-  it('code examples do not create links headings or reference definitions', () => {
+  it('code examples do not create links headings or reference definitions', async () => {
     const root = makeTempRoot();
     const markdown = [
       '# Real',
@@ -347,13 +354,13 @@ describe('M3 supported-form hardening', () => {
     expect(collectHeadingSlugs(markdown)).toEqual(['real']);
   });
 
-  it('json output remains valid when diagnostics contain special characters', () => {
+  it('json output remains valid when diagnostics contain special characters', async () => {
     const root = makeTempRoot();
     writeFiles(root, {
       'README.md': '[weird](<docs/"quoted" \\ café.md>) and [dash](<docs/—.md>)',
     });
 
-    const result = captureRun(['--json', root]);
+    const result = await captureRun(['--json', root]);
     const document = parseJson(result.stdout);
 
     expect(result.exitCode).toBe(1);
@@ -365,17 +372,17 @@ describe('M3 supported-form hardening', () => {
 });
 
 describe('README behavior claims', () => {
-  it('explicit file inputs are checked even without a Markdown extension', () => {
+  it('explicit file inputs are checked even without a Markdown extension', async () => {
     const root = makeTempRoot();
     writeFiles(root, { 'notes.txt': '[missing](missing.md)' });
 
-    const result = captureRun([join(root, 'notes.txt')]);
+    const result = await captureRun([join(root, 'notes.txt')]);
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain('missing.md — target does not exist');
     expect(result.stdout).toContain('Checked 1 file: 1 broken target, 0 external links skipped.');
   });
 
-  it('Markdown extensions are discovered case-insensitively', () => {
+  it('Markdown extensions are discovered case-insensitively', async () => {
     const root = makeTempRoot();
     writeFiles(root, {
       'lower.md': '',
@@ -397,7 +404,7 @@ describe('README behavior claims', () => {
     expect(checkMarkdown([join(root, 'README.md')]).diagnostics).toEqual([]);
   });
 
-  it('explicit symlink inputs are followed and walk symlinks are skipped', () => {
+  it('explicit symlink inputs are followed and walk symlinks are skipped', async () => {
     if (process.platform === 'win32') {
       return;
     }
@@ -412,19 +419,19 @@ describe('README behavior claims', () => {
     expect(discovered).not.toContain(join(root, 'linked-dir', 'inside.md'));
 
     expect(discoverMarkdownFiles([join(root, 'linked.md')])).toEqual([join(root, 'linked.md')]);
-    const result = captureRun([join(root, 'linked.md')]);
+    const result = await captureRun([join(root, 'linked.md')]);
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain('Checked 1 file');
   });
 
-  it('relative targets outside the input root are checked', () => {
+  it('relative targets outside the input root are checked', async () => {
     const root = makeTempRoot();
     writeFiles(root, {
       'outside.md': '# Outside',
       'docs/guide.md': '[outside](../outside.md) and [missing](../missing.md)',
     });
 
-    const result = captureRun(['--json', join(root, 'docs')]);
+    const result = await captureRun(['--json', join(root, 'docs')]);
     const document = parseJson(result.stdout);
     expect(result.exitCode).toBe(1);
     expect(document.summary.filesChecked).toBe(1);

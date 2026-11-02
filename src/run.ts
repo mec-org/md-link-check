@@ -1,5 +1,10 @@
-import { checkMarkdown, type CheckResult } from './checker.js';
+import {
+  checkMarkdown,
+  checkMarkdownWithExternal,
+  type CheckResult,
+} from './checker.js';
 import { discoverMarkdownFiles, InputError } from './discovery.js';
+import type { ExternalCheckOptions } from './external.js';
 import { formatDiagnostic, formatJson, formatSummary, HELP, USAGE_LINE } from './report.js';
 
 export interface CliIo {
@@ -7,19 +12,40 @@ export interface CliIo {
   writeError(text: string): void;
 }
 
+/**
+ * Internal options for tests. Production uses the documented defaults; M5 adds
+ * no timeout, retry or concurrency CLI flags.
+ */
+export interface RunOptions {
+  external?: ExternalCheckOptions;
+}
+
 interface ParsedArgs {
   json: boolean;
+  external: boolean;
   help: boolean;
   paths: string[];
   error: string | null;
 }
 
-const EMPTY_RESULT: CheckResult = {
-  diagnostics: [],
-  filesChecked: 0,
-  broken: 0,
-  externalSkipped: 0,
-};
+function emptyResult(externalEnabled: boolean): CheckResult {
+  return {
+    diagnostics: [],
+    filesChecked: 0,
+    broken: 0,
+    externalSkipped: 0,
+    external: {
+      enabled: externalEnabled,
+      occurrences: 0,
+      skipped: 0,
+      distinctChecked: 0,
+      succeeded: 0,
+      failed: 0,
+      brokenOccurrences: 0,
+      results: [],
+    },
+  };
+}
 
 /**
  * Runs the CLI and returns its exit code:
@@ -32,8 +58,16 @@ const EMPTY_RESULT: CheckResult = {
  * standard error. With `--json`, a check run writes exactly one JSON document
  * to standard output, including for usage errors; `--help` always prints help
  * and exits 0.
+ *
+ * External checking is strictly opt-in through `--external`. Without it no
+ * fetch is called and HTTP(S) targets stay counted as skipped. Argument and
+ * discovery errors return before any external check can start.
  */
-export function run(args: readonly string[], io: CliIo): number {
+export async function run(
+  args: readonly string[],
+  io: CliIo,
+  options: RunOptions = {},
+): Promise<number> {
   const parsed = parseArgs(args);
 
   if (parsed.help) {
@@ -42,7 +76,7 @@ export function run(args: readonly string[], io: CliIo): number {
   }
 
   if (parsed.error !== null) {
-    return reportUsageError(parsed.error, parsed.json, io);
+    return reportUsageError(parsed.error, parsed.json, parsed.external, io);
   }
 
   let files: string[];
@@ -50,12 +84,14 @@ export function run(args: readonly string[], io: CliIo): number {
     files = discoverMarkdownFiles(parsed.paths);
   } catch (error) {
     if (error instanceof InputError) {
-      return reportUsageError(error.message, parsed.json, io);
+      return reportUsageError(error.message, parsed.json, parsed.external, io);
     }
     throw error;
   }
 
-  const result = checkMarkdown(files);
+  const result = parsed.external
+    ? await checkMarkdownWithExternal(files, options.external)
+    : checkMarkdown(files);
   const exitCode = result.diagnostics.length === 0 ? 0 : 1;
 
   if (parsed.json) {
@@ -73,11 +109,13 @@ export function run(args: readonly string[], io: CliIo): number {
 /**
  * Parses flags and paths. Arguments are read fully before the first error is
  * reported so that `--json` is honoured for a usage error wherever it appears
- * before `--`. `--help` wins over other argument errors.
+ * before `--`. `--help` wins over other argument errors. Repeated `--json` and
+ * `--external` are accepted idempotently, matching the existing flag convention.
  */
 function parseArgs(args: readonly string[]): ParsedArgs {
   const paths: string[] = [];
   let json = false;
+  let external = false;
   let help = false;
   let endOfOptions = false;
   let error: string | null = null;
@@ -89,6 +127,10 @@ function parseArgs(args: readonly string[]): ParsedArgs {
     }
     if (!endOfOptions && argument === '--json') {
       json = true;
+      continue;
+    }
+    if (!endOfOptions && argument === '--external') {
+      external = true;
       continue;
     }
     if (!endOfOptions && (argument === '--help' || argument === '-h')) {
@@ -106,12 +148,17 @@ function parseArgs(args: readonly string[]): ParsedArgs {
     error = 'no input paths';
   }
 
-  return { json, help, paths, error };
+  return { json, external, help, paths, error };
 }
 
-function reportUsageError(message: string, json: boolean, io: CliIo): number {
+function reportUsageError(
+  message: string,
+  json: boolean,
+  external: boolean,
+  io: CliIo,
+): number {
   if (json) {
-    io.writeOut(formatJson(EMPTY_RESULT, 2, { kind: 'usage', message }));
+    io.writeOut(formatJson(emptyResult(external), 2, { kind: 'usage', message }));
     return 2;
   }
 

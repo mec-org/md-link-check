@@ -1,7 +1,9 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { checkMarkdown } from '../src/checker.js';
+import { discoverMarkdownFiles } from '../src/discovery.js';
 import { collectHeadingSlugs } from '../src/headings.js';
 import { run, type CliIo } from '../src/run.js';
 import { makeTempRoot, writeFiles } from './helpers.js';
@@ -87,7 +89,7 @@ function parseTextOutput(stdout: string): {
  *
  * This is a synthetic fixture, not copied from the owner's dsh-copilot
  * documentation and free of confidential content. It locks the end-to-end
- * determinism contract that the real-docs run will use.
+ * determinism contract that the real-docs run used.
  */
 function writeDocsFixture(root: string): void {
   writeFiles(root, {
@@ -113,7 +115,7 @@ function writeDocsFixture(root: string): void {
 }
 
 describe('M3 end-to-end stability', () => {
-  it('real docs fixture produces deterministic diagnostics', () => {
+  it('docs-shaped fixture produces deterministic diagnostics', () => {
     const root = makeTempRoot();
     writeDocsFixture(root);
 
@@ -199,7 +201,7 @@ describe('M3 end-to-end stability', () => {
     expect(result.stderr).toContain('no input paths');
   });
 
-  it('external links are counted without network access', () => {
+  it('external links are counted without calling fetch', () => {
     const root = makeTempRoot();
     writeFiles(root, {
       'README.md': [
@@ -222,6 +224,18 @@ describe('M3 end-to-end stability', () => {
       expect(fetchCalls).toBe(0);
     } finally {
       globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('source contains no network client imports', () => {
+    const sourceDirectory = fileURLToPath(new URL('../src/', import.meta.url));
+    const sources = readdirSync(sourceDirectory)
+      .filter((name) => name.endsWith('.ts'))
+      .map((name) => readFileSync(join(sourceDirectory, name), 'utf8'));
+
+    for (const source of sources) {
+      expect(source).not.toMatch(/from ['"]node:(?:http|https|net|dns|tls)['"]/);
+      expect(source).not.toMatch(/\bfetch\s*\(/);
     }
   });
 
@@ -329,5 +343,73 @@ describe('M3 supported-form hardening', () => {
       'docs/"quoted" \\ café.md',
       'docs/—.md',
     ]);
+  });
+});
+
+describe('README behavior claims', () => {
+  it('explicit file inputs are checked even without a Markdown extension', () => {
+    const root = makeTempRoot();
+    writeFiles(root, { 'notes.txt': '[missing](missing.md)' });
+
+    const result = captureRun([join(root, 'notes.txt')]);
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('missing.md — target does not exist');
+    expect(result.stdout).toContain('Checked 1 file: 1 broken target, 0 external links skipped.');
+  });
+
+  it('Markdown extensions are discovered case-insensitively', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'lower.md': '',
+      'mixed.Markdown': '',
+      'upper.MD': '',
+      'notes.txt': '',
+    });
+
+    expect(discoverMarkdownFiles([root])).toEqual([
+      join(root, 'lower.md'),
+      join(root, 'mixed.Markdown'),
+      join(root, 'upper.MD'),
+    ]);
+
+    writeFiles(root, {
+      'README.md': '[guide](guide.MD#heading)',
+      'guide.MD': '# Heading',
+    });
+    expect(checkMarkdown([join(root, 'README.md')]).diagnostics).toEqual([]);
+  });
+
+  it('explicit symlink inputs are followed and walk symlinks are skipped', () => {
+    if (process.platform === 'win32') {
+      return;
+    }
+    const root = makeTempRoot();
+    writeFiles(root, { 'real.md': '# Real', 'real-dir/inside.md': '' });
+    symlinkSync(join(root, 'real.md'), join(root, 'linked.md'));
+    symlinkSync(join(root, 'real-dir'), join(root, 'linked-dir'));
+
+    const discovered = discoverMarkdownFiles([root]);
+    expect(discovered).toContain(join(root, 'real.md'));
+    expect(discovered).not.toContain(join(root, 'linked.md'));
+    expect(discovered).not.toContain(join(root, 'linked-dir', 'inside.md'));
+
+    expect(discoverMarkdownFiles([join(root, 'linked.md')])).toEqual([join(root, 'linked.md')]);
+    const result = captureRun([join(root, 'linked.md')]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('Checked 1 file');
+  });
+
+  it('relative targets outside the input root are checked', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'outside.md': '# Outside',
+      'docs/guide.md': '[outside](../outside.md) and [missing](../missing.md)',
+    });
+
+    const result = captureRun(['--json', join(root, 'docs')]);
+    const document = parseJson(result.stdout);
+    expect(result.exitCode).toBe(1);
+    expect(document.summary.filesChecked).toBe(1);
+    expect(document.diagnostics.map((diagnostic) => diagnostic.target)).toEqual(['../missing.md']);
   });
 });

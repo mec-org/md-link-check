@@ -4,7 +4,7 @@ md-link-check is an offline CLI that finds broken relative links, images and hea
 
 See [PROJECT.md](PROJECT.md) for the charter, [ROADMAP.md](ROADMAP.md) for the milestones and [CONTRIBUTING.md](CONTRIBUTING.md) for who may open issues and pull requests.
 
-> **Status: M3 complete.** Inline and reference-style links and images, heading anchors, stable text output, `--json` and the documented exit codes are implemented, and the M3 hardening pass and real-docs verification run are complete. The release decision remains with the owner. See [Current limitations](#current-limitations).
+> **Status: M3 hardening and the real-docs run are complete; merge verification is pending.** Inline and reference-style links and images, heading anchors, stable text output, `--json` and the documented exit codes are implemented. The hardening pass and the real-docs verification run are complete: 18 Markdown files checked, 2 confirmed real broken targets, and no checker false positives. CI green on `main` and the release decision follow the merge. See [Current limitations](#current-limitations).
 
 ## Requirements
 
@@ -185,7 +185,7 @@ Other URI schemes (`mailto:`, `ftp:`), protocol-relative targets (`//example.com
 
 ## CI
 
-The CLI can run as a normal CI step after a build. There is no published package or GitHub Action, so invoke the built file directly:
+The CLI can run as a normal CI step after a build. The example below runs inside a checkout of md-link-check itself and checks that checkout's `docs/` tree. There is no published package or GitHub Action, so invoke the built file directly:
 
 ```yaml
 - uses: actions/checkout@v4
@@ -196,6 +196,8 @@ The CLI can run as a normal CI step after a build. There is no published package
 - run: npm run build
 - run: node dist/cli.js docs
 ```
+
+To check a different repository, check out md-link-check at a pinned commit into a subdirectory, build it there, and run `node md-link-check/dist/cli.js <path-to-that-repository>` from the job workspace.
 
 The step fails the job with exit `1` when a broken target is found and exit `2` on a usage error. Add `--json` and redirect standard output when a machine-readable report is needed as an artifact; the report is written before the process exits.
 

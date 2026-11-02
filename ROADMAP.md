@@ -17,7 +17,7 @@ Edge cases found on real input, and a README with usage and the unsupported form
 Acceptance: the definition of done in PROJECT.md holds; CI green on main. The release decision is the owner's.
 
 ## M4 — Explicit HTML anchors and targets
-Extend the existing scanner to recognize explicit anchor targets from <a id="…"> and <a name="…">, raw HTML links from <a href="…">, and raw HTML images from <img src="…">. Attribute names and tag names are case-insensitive; quoted and unquoted attribute values are supported. These forms follow the existing rules for relative targets, anchors, external-URL skipping, code-block exclusion, diagnostics and exit codes. Other raw HTML remains unsupported.
+Extend the existing scanner to recognize explicit anchor targets from `<a id="…">` and `<a name="…">`, raw HTML links from `<a href="…">`, and raw HTML images from `<img src="…">`. Attribute names and tag names are case-insensitive; quoted and unquoted attribute values are supported. These forms follow the existing rules for relative targets, anchors, external-URL skipping, code-block exclusion, diagnostics and exit codes. Other raw HTML remains unsupported.
 Acceptance: fixture tests cover supported anchor, link and image forms, attribute ordering and casing, quoted and unquoted values, same-file and cross-file anchors, missing targets, and exclusion inside fenced, indented and inline code; existing Markdown fixtures remain green; the PR changes neither `.github/` nor `.project/`.
 
 ## M5 — Opt-in external checking contract

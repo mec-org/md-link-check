@@ -1,4 +1,4 @@
-import { maskCodeLines } from './parser.js';
+import { maskCodeLines, scanHtml } from './parser.js';
 
 /** An ATX or setext heading found in Markdown, before it is slugged. */
 export interface Heading {
@@ -108,6 +108,23 @@ export function collectHeadingSlugs(markdown: string): string[] {
   return scanHeadings(markdown).map((heading) =>
     reserveSlug(slugifyHeading(heading.text), reserved),
   );
+}
+
+/**
+ * Collects every anchor name a document defines, in document order: its
+ * heading slugs followed by its explicit `<a id="…">` and `<a name="…">`
+ * values. Explicit values are kept literally (they are not slugified and get no
+ * `-1`/`-2` suffix) and duplicates collapse, so repeated explicit anchors still
+ * resolve to the same name.
+ */
+export function collectDocumentAnchors(markdown: string): string[] {
+  const anchors = new Set(collectHeadingSlugs(markdown));
+
+  for (const explicit of scanHtml(markdown).anchors) {
+    anchors.add(explicit.value);
+  }
+
+  return [...anchors];
 }
 
 function reserveSlug(base: string, reserved: Map<string, number>): string {

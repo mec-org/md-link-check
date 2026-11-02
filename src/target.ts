@@ -5,11 +5,12 @@ export type TargetClassification =
 const URI_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 
 /**
- * Decides what M0 should do with a Markdown target.
+ * Decides how a Markdown target's path should be treated.
  *
- * Only relative paths are checked. Fragment-only targets are deferred to the
- * anchor milestone, absolute (root-relative) targets are out of scope, and any
- * URI (including HTTP and HTTPS) is skipped without network access.
+ * Only relative paths are checked. A fragment-only target has no path to check
+ * and is reported as skipped here; the checker validates its anchor separately.
+ * Absolute (root-relative) targets are out of scope, and any URI (including
+ * HTTP and HTTPS) is skipped without network access.
  */
 export function classifyTarget(rawTarget: string): TargetClassification {
   const target = rawTarget.trim();

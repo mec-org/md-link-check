@@ -108,11 +108,11 @@ describe('relative target checking', () => {
     ]);
   });
 
-  it('validates only the path part of a target with a fragment', () => {
+  it('keeps validating a relative path when the target also has a fragment', () => {
     const root = makeTempRoot();
     writeFiles(root, {
       'README.md': '[guide](docs/guide.md#installation) and [broken](docs/missing.md#x)',
-      'docs/guide.md': '# Guide',
+      'docs/guide.md': '# Installation',
     });
 
     expect(check(root, 'README.md').map((diagnostic) => diagnostic.target)).toEqual([
@@ -120,17 +120,247 @@ describe('relative target checking', () => {
     ]);
   });
 
-  it('skips external, fragment-only and root-relative targets', () => {
+  it('skips external and root-relative targets', () => {
     const root = makeTempRoot();
     writeFiles(root, {
       'README.md': [
         '[web](https://example.com/guide.md)',
         '[mail](mailto:someone@example.com)',
-        '[section](#installation)',
         '[root](/docs/guide.md)',
       ].join(' '),
     });
 
     expect(check(root, 'README.md')).toEqual([]);
+  });
+});
+
+describe('same-file anchors', () => {
+  it('accepts an existing same-file anchor', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': ['# Installation', '', '[jump](#installation)'].join('\n'),
+    });
+
+    expect(check(root, 'README.md')).toEqual([]);
+  });
+
+  it('reports a missing same-file anchor', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': ['# Installation', '', '[jump](#install)'].join('\n'),
+    });
+
+    expect(check(root, 'README.md')).toEqual([
+      {
+        file: join(root, 'README.md'),
+        line: 3,
+        column: 1,
+        kind: 'link',
+        target: '#install',
+        reason: 'anchor does not exist',
+      },
+    ]);
+  });
+
+  it('accepts a duplicate heading anchor with suffix', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': [
+        '# Repeat',
+        '',
+        'Between the headings.',
+        '',
+        '## Repeat',
+        '',
+        '[first](#repeat) and [second](#repeat-1)',
+      ].join('\n'),
+    });
+
+    expect(check(root, 'README.md')).toEqual([]);
+  });
+
+  it('reports every missing same-file anchor', () => {
+    const root = makeTempRoot();
+    writeFiles(root, { 'README.md': '[one](#one) and [two](#two)' });
+
+    expect(check(root, 'README.md').map((diagnostic) => diagnostic.target)).toEqual([
+      '#one',
+      '#two',
+    ]);
+  });
+});
+
+describe('anchor code exclusions', () => {
+  it('ignores anchor links inside fenced code', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': [
+        '# Real',
+        '',
+        '```md',
+        '[fake](#missing)',
+        '```',
+        '',
+        '~~~',
+        '[also fake](#tilde-missing)',
+        '~~~',
+        '',
+        '[real](#real)',
+      ].join('\n'),
+    });
+
+    expect(check(root, 'README.md')).toEqual([]);
+  });
+
+  it('ignores anchor links inside indented code', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': ['# Real', '', '    [fake](#missing)', '', '[real](#real)'].join('\n'),
+    });
+
+    expect(check(root, 'README.md')).toEqual([]);
+  });
+
+  it('ignores anchor links inside inline code', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': [
+        '# Real',
+        '',
+        'Use `[fake](#missing)` in prose.',
+        '',
+        '[real](#real)',
+      ].join('\n'),
+    });
+
+    expect(check(root, 'README.md')).toEqual([]);
+  });
+
+  it('a fake heading inside code does not satisfy an anchor', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': [
+        '# Real',
+        '',
+        '```md',
+        '# fake',
+        '```',
+        '',
+        '[fake](#fake)',
+      ].join('\n'),
+    });
+
+    expect(check(root, 'README.md')).toEqual([
+      {
+        file: join(root, 'README.md'),
+        line: 7,
+        column: 1,
+        kind: 'link',
+        target: '#fake',
+        reason: 'anchor does not exist',
+      },
+    ]);
+  });
+});
+
+describe('cross-file anchors', () => {
+  it('accepts an existing anchor in another Markdown file', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': ['# Project', '', '[details](docs/guide.md#installation)'].join('\n'),
+      'docs/guide.md': '# Installation',
+    });
+
+    expect(check(root, 'README.md')).toEqual([]);
+  });
+
+  it('reports a missing anchor in another Markdown file', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': '[details](docs/guide.md#deployment)',
+      'docs/guide.md': '# Installation',
+    });
+
+    expect(check(root, 'README.md')).toEqual([
+      {
+        file: join(root, 'README.md'),
+        line: 1,
+        column: 1,
+        kind: 'link',
+        target: 'docs/guide.md#deployment',
+        reason: 'anchor does not exist',
+      },
+    ]);
+  });
+
+  it('resolves an anchored Markdown path relative to the source file', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': '# Project',
+      'docs/guide.md': ['# Guide', '', '[back home](../README.md#project)'].join('\n'),
+    });
+
+    expect(check(root, 'docs/guide.md')).toEqual([]);
+  });
+
+  it('reports a missing target file without a second anchor diagnostic', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': '[details](docs/missing.md#installation)',
+    });
+
+    expect(check(root, 'README.md')).toEqual([
+      {
+        file: join(root, 'README.md'),
+        line: 1,
+        column: 1,
+        kind: 'link',
+        target: 'docs/missing.md#installation',
+        reason: 'target does not exist',
+      },
+    ]);
+  });
+
+  it('does not validate anchors for an existing non-Markdown target', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': '[data](assets/data.txt#section)',
+      'assets/data.txt': 'section: raw data',
+    });
+
+    expect(check(root, 'README.md')).toEqual([]);
+  });
+
+  it('does not validate anchors for a directory target', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': '[docs](docs/#section)',
+      'docs/guide.md': '# Guide',
+    });
+
+    expect(check(root, 'README.md')).toEqual([]);
+  });
+
+  it('does not leak duplicate heading state between target files', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': '[first](a.md#repeat) and [second](b.md#repeat)',
+      'a.md': '# Repeat',
+      'b.md': '# Repeat',
+    });
+
+    expect(check(root, 'README.md')).toEqual([]);
+  });
+
+  it('checks every link to the same cached target document', () => {
+    const root = makeTempRoot();
+    writeFiles(root, {
+      'README.md': '[good](docs/guide.md#installation) and [bad](docs/guide.md#deployment)',
+      'docs/guide.md': '# Installation',
+    });
+
+    expect(check(root, 'README.md').map((diagnostic) => diagnostic.target)).toEqual([
+      'docs/guide.md#deployment',
+    ]);
   });
 });

@@ -15,6 +15,14 @@ interface ParsedLink {
   end: number;
 }
 
+/** The result of masking every code exclusion in a Markdown document. */
+export interface MaskedLines {
+  /** The document's lines with code replaced by spaces; the line count is unchanged. */
+  readonly masked: readonly string[];
+  /** True for each line that belongs to a fenced or indented code block. */
+  readonly codeBlock: readonly boolean[];
+}
+
 const OPENING_FENCE = /^ {0,3}(`{3,}|~{3,})/;
 const CLOSING_FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
 const BLANK_LINE = /^[ \t]*$/;
@@ -25,12 +33,12 @@ const INDENTED_CODE = /^(?: {4,}|\t)/;
  *
  * Fenced code blocks, inline code spans and indented code blocks are masked
  * before scanning, so link-looking text inside them is ignored. Reference-style
- * links, raw HTML and autolinks are intentionally outside M0's scope and are
- * not returned.
+ * links, raw HTML and autolinks are intentionally outside the supported scope
+ * and are not returned.
  */
 export function scanInlineReferences(markdown: string): InlineReference[] {
   const lines = markdown.split(/\r?\n/);
-  const maskedLines = maskCode(lines);
+  const { masked: maskedLines } = maskCodeLines(lines);
   const references: InlineReference[] = [];
 
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
@@ -73,8 +81,14 @@ export function scanInlineReferences(markdown: string): InlineReference[] {
   return references;
 }
 
-function maskCode(lines: readonly string[]): string[] {
+/**
+ * Masks fenced code blocks, indented code blocks and inline code spans with
+ * spaces, preserving line count and column positions. Link scanning and heading
+ * collection share this single code-exclusion interpretation.
+ */
+export function maskCodeLines(lines: readonly string[]): MaskedLines {
   const masked: string[] = [];
+  const codeBlock: boolean[] = [];
   let fence: { character: string; length: number } | null = null;
   let inIndentedCode = false;
 
@@ -83,6 +97,7 @@ function maskCode(lines: readonly string[]): string[] {
 
     if (fence !== null) {
       masked.push(' '.repeat(line.length));
+      codeBlock.push(true);
       const closing = CLOSING_FENCE.exec(line);
       const marker = closing?.[1];
       if (marker !== undefined && marker.charAt(0) === fence.character && marker.length >= fence.length) {
@@ -95,21 +110,24 @@ function maskCode(lines: readonly string[]): string[] {
     if (opening !== undefined) {
       fence = { character: opening.charAt(0), length: opening.length };
       masked.push(' '.repeat(line.length));
+      codeBlock.push(true);
       inIndentedCode = false;
       continue;
     }
 
     if (isIndentedCodeLine(lines, index, inIndentedCode)) {
       masked.push(' '.repeat(line.length));
+      codeBlock.push(true);
       inIndentedCode = true;
       continue;
     }
 
     inIndentedCode = false;
     masked.push(maskInlineCode(line));
+    codeBlock.push(false);
   }
 
-  return masked;
+  return { masked, codeBlock };
 }
 
 /**

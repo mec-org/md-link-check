@@ -128,9 +128,9 @@ function reserveSlug(base: string, reserved: Map<string, number>): string {
 
 /**
  * Approximates the text GitHub renders for a heading before slugging: inline
- * link syntax becomes its label, inline code is kept literally, and underscore
- * emphasis markers are removed where CommonMark treats them as delimiters.
- * Images and reference-style links remain outside M1's scope.
+ * and reference-style link syntax becomes its label, inline code is kept
+ * literally, and underscore emphasis markers are removed where CommonMark
+ * treats them as delimiters.
  */
 function renderedHeadingText(text: string): string {
   const withoutLinkDestinations = stripInlineLinkDestinations(text);
@@ -158,7 +158,7 @@ function stripInlineLinkDestinations(text: string): string {
     if (character === '!' && text.charAt(index + 1) === '[' && !isEscaped(text, index)) {
       const image = parseLinkLike(text, index + 1);
       if (image !== null) {
-        result += text.slice(index, image.end);
+        result += stripInlineLinkDestinations(text.slice(index + 2, image.labelEnd));
         index = image.end;
         continue;
       }
@@ -180,16 +180,31 @@ function stripInlineLinkDestinations(text: string): string {
   return result;
 }
 
+/**
+ * Returns the label range of an inline link (`[label](target)`) or a full or
+ * collapsed reference-style link (`[label][reference]`, `[label][]`). A
+ * shortcut reference (`[label]`) has no trailing syntax to drop and is left to
+ * the normal slug rule, which already discards the surrounding brackets.
+ */
 function parseLinkLike(text: string, bracket: number): { labelEnd: number; end: number } | null {
   const labelEnd = findClosingBracket(text, bracket);
-  if (labelEnd === -1 || text.charAt(labelEnd + 1) !== '(') {
+  if (labelEnd === -1) {
     return null;
   }
-  const closing = findClosingParen(text, labelEnd + 1);
-  if (closing === -1) {
-    return null;
+  if (text.charAt(labelEnd + 1) === '(') {
+    const closing = findClosingParen(text, labelEnd + 1);
+    if (closing === -1) {
+      return null;
+    }
+    return { labelEnd, end: closing + 1 };
   }
-  return { labelEnd, end: closing + 1 };
+  if (text.charAt(labelEnd + 1) === '[') {
+    const referenceEnd = findClosingBracket(text, labelEnd + 1);
+    if (referenceEnd !== -1) {
+      return { labelEnd, end: referenceEnd + 1 };
+    }
+  }
+  return null;
 }
 
 function inlineCodeRanges(text: string): CodeRange[] {

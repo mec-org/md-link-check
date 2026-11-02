@@ -1,10 +1,11 @@
 import { readFileSync, statSync, type Stats } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { collectHeadingSlugs } from './headings.js';
-import { scanInlineReferences, type InlineReference, type LinkKind } from './parser.js';
+import { scanMarkdown, type LinkKind } from './parser.js';
 import { classifyTarget } from './target.js';
 
 const MARKDOWN_FILE = /\.(?:md|markdown)$/i;
+const COUNTED_EXTERNAL = /^https?:/i;
 
 export interface Diagnostic {
   file: string;
@@ -15,80 +16,147 @@ export interface Diagnostic {
   reason: string;
 }
 
+/** Everything one checking run produced, ready for either reporter. */
+export interface CheckResult {
+  /** Broken targets and undefined references, in deterministic document order. */
+  diagnostics: Diagnostic[];
+  /** Number of unique files that were checked. */
+  filesChecked: number;
+  /** Number of diagnostics (broken targets plus undefined references). */
+  broken: number;
+  /** Number of skipped HTTP(S) link and image uses. */
+  externalSkipped: number;
+}
+
 /**
  * Checks every relative link and image target in the given Markdown files, then
  * the heading anchors of fragment-only targets and of relative Markdown targets
- * that exist. All broken targets are collected; checking does not stop at the
- * first one.
+ * that exist. Reference-style uses are resolved through their definition in the
+ * same document, and are reported at the use site. Every broken target is
+ * collected; checking does not stop at the first one.
  *
  * Heading slugs are cached per resolved file path for one run. The cache stores
  * completed slug sets, so duplicate-numbering state never crosses documents.
  */
-export function checkMarkdownFiles(files: readonly string[]): Diagnostic[] {
+export function checkMarkdown(files: readonly string[]): CheckResult {
   const diagnostics: Diagnostic[] = [];
   const headingSlugs = new Map<string, ReadonlySet<string>>();
+  let externalSkipped = 0;
 
   for (const file of files) {
     const markdown = readFileSync(file, 'utf8');
     const sourceSlugs = headingsOf(file, markdown, headingSlugs);
+    const scan = scanMarkdown(markdown);
 
-    for (const reference of scanInlineReferences(markdown)) {
-      const target = reference.target.trim();
-
-      if (target.startsWith('#')) {
-        const fragment = decodeFragment(target.slice(1));
-        if (fragment !== '' && !sourceSlugs.has(fragment)) {
-          diagnostics.push(missingAnchor(file, reference));
+    for (const reference of scan.references) {
+      if (reference.style === 'reference') {
+        const definition = scan.definitions.get(reference.label);
+        if (definition === undefined) {
+          diagnostics.push({
+            file,
+            line: reference.line,
+            column: reference.column,
+            kind: reference.kind,
+            target: reference.labelText,
+            reason: 'reference definition does not exist',
+          });
+          continue;
+        }
+        if (isCountedExternal(definition.target)) {
+          externalSkipped += 1;
+        }
+        const diagnostic = checkTarget(
+          file,
+          definition.target,
+          reference.kind,
+          reference.line,
+          reference.column,
+          sourceSlugs,
+          headingSlugs,
+        );
+        if (diagnostic !== null) {
+          diagnostics.push(diagnostic);
         }
         continue;
       }
 
-      const classification = classifyTarget(reference.target);
-      if (classification.kind !== 'relative') {
-        continue;
+      if (isCountedExternal(reference.target)) {
+        externalSkipped += 1;
       }
-
-      const targetPath = resolve(dirname(file), classification.path);
-      const stats = statOf(targetPath);
-      if (stats === null) {
-        diagnostics.push({
-          file,
-          line: reference.line,
-          column: reference.column,
-          kind: reference.kind,
-          target: reference.target,
-          reason: 'target does not exist',
-        });
-        continue;
-      }
-
-      const fragment = classification.fragment;
-      if (fragment === null || fragment === '') {
-        continue;
-      }
-      if (!stats.isFile() || !MARKDOWN_FILE.test(classification.path)) {
-        continue;
-      }
-
-      const targetSlugs = headingsOf(targetPath, null, headingSlugs);
-      if (!targetSlugs.has(decodeFragment(fragment))) {
-        diagnostics.push(missingAnchor(file, reference));
+      const diagnostic = checkTarget(
+        file,
+        reference.target,
+        reference.kind,
+        reference.line,
+        reference.column,
+        sourceSlugs,
+        headingSlugs,
+      );
+      if (diagnostic !== null) {
+        diagnostics.push(diagnostic);
       }
     }
   }
 
-  return diagnostics;
+  return { diagnostics, filesChecked: files.length, broken: diagnostics.length, externalSkipped };
 }
 
-function missingAnchor(file: string, reference: InlineReference): Diagnostic {
-  return {
-    file,
-    line: reference.line,
-    column: reference.column,
-    kind: reference.kind,
-    target: reference.target,
-    reason: 'anchor does not exist',
-  };
+/**
+ * Compatibility wrapper for callers that only need the diagnostics. New code
+ * should use `checkMarkdown`, which also reports the summary counts.
+ */
+export function checkMarkdownFiles(files: readonly string[]): Diagnostic[] {
+  return checkMarkdown(files).diagnostics;
+}
+
+/** True for a skipped HTTP(S) use; other schemes are skipped but not counted. */
+function isCountedExternal(target: string): boolean {
+  return COUNTED_EXTERNAL.test(target.trim());
+}
+
+function checkTarget(
+  file: string,
+  target: string,
+  kind: LinkKind,
+  line: number,
+  column: number,
+  sourceSlugs: ReadonlySet<string>,
+  headingSlugs: Map<string, ReadonlySet<string>>,
+): Diagnostic | null {
+  const trimmed = target.trim();
+
+  if (trimmed.startsWith('#')) {
+    const fragment = decodeFragment(trimmed.slice(1));
+    if (fragment !== '' && !sourceSlugs.has(fragment)) {
+      return { file, line, column, kind, target, reason: 'anchor does not exist' };
+    }
+    return null;
+  }
+
+  const classification = classifyTarget(target);
+  if (classification.kind !== 'relative') {
+    return null;
+  }
+
+  const targetPath = resolve(dirname(file), classification.path);
+  const stats = statOf(targetPath);
+  if (stats === null) {
+    return { file, line, column, kind, target, reason: 'target does not exist' };
+  }
+
+  const fragment = classification.fragment;
+  if (fragment === null || fragment === '') {
+    return null;
+  }
+  if (!stats.isFile() || !MARKDOWN_FILE.test(classification.path)) {
+    return null;
+  }
+
+  const targetSlugs = headingsOf(targetPath, null, headingSlugs);
+  if (!targetSlugs.has(decodeFragment(fragment))) {
+    return { file, line, column, kind, target, reason: 'anchor does not exist' };
+  }
+  return null;
 }
 
 function headingsOf(

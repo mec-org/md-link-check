@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { scanInlineReferences } from '../src/parser.js';
+import { scanInlineReferences, scanMarkdown } from '../src/parser.js';
 
 describe('inline Markdown scanning', () => {
   it('finds an inline relative file link', () => {
@@ -63,5 +63,152 @@ describe('inline Markdown scanning', () => {
 
   it('ignores escaped brackets and reference-style links', () => {
     expect(scanInlineReferences('\\[not a link](missing.md) and [ref][target].')).toEqual([]);
+  });
+});
+
+describe('reference-style Markdown scanning', () => {
+  function referenceUses(markdown: string) {
+    return scanMarkdown(markdown).references.flatMap((reference) =>
+      reference.style === 'reference'
+        ? [{ kind: reference.kind, label: reference.label, line: reference.line, column: reference.column }]
+        : [],
+    );
+  }
+
+  function definitions(markdown: string) {
+    return [...scanMarkdown(markdown).definitions.values()].map(({ label, target, line }) => ({
+      label,
+      target,
+      line,
+    }));
+  }
+
+  it('finds a full reference-style link', () => {
+    const markdown = ['See [the guide][docs].', '', '[docs]: docs/guide.md'].join('\n');
+
+    expect(referenceUses(markdown)).toEqual([{ kind: 'link', label: 'docs', line: 1, column: 5 }]);
+    expect(definitions(markdown)).toEqual([{ label: 'docs', target: 'docs/guide.md', line: 3 }]);
+  });
+
+  it('finds a full reference-style image', () => {
+    const markdown = ['![architecture][design]', '', '[design]: images/architecture.png'].join('\n');
+
+    expect(referenceUses(markdown)).toEqual([
+      { kind: 'image', label: 'design', line: 1, column: 1 },
+    ]);
+  });
+
+  it('matches reference labels case-insensitively', () => {
+    const markdown = ['[Guide][DOCS]', '', '[DoCs]: docs/guide.md'].join('\n');
+
+    expect(referenceUses(markdown)).toEqual([{ kind: 'link', label: 'docs', line: 1, column: 1 }]);
+    expect(definitions(markdown)).toEqual([{ label: 'docs', target: 'docs/guide.md', line: 3 }]);
+  });
+
+  it('trims surrounding reference label whitespace', () => {
+    const markdown = ['[Guide][ docs ]', '', '[ docs ]: docs/guide.md'].join('\n');
+
+    expect(referenceUses(markdown)).toEqual([{ kind: 'link', label: 'docs', line: 1, column: 1 }]);
+    expect(definitions(markdown)).toEqual([{ label: 'docs', target: 'docs/guide.md', line: 3 }]);
+  });
+
+  it('does not emit a reference definition as an inline link', () => {
+    const markdown = ['[guide][docs]', '', '[docs]: docs/guide.md'].join('\n');
+
+    expect(scanInlineReferences(markdown)).toEqual([]);
+    expect(referenceUses(markdown)).toEqual([{ kind: 'link', label: 'docs', line: 1, column: 1 }]);
+  });
+
+  it('uses a deterministic rule for duplicate definitions', () => {
+    const markdown = ['[guide][docs]', '', '[docs]: first.md', '[docs]: second.md'].join('\n');
+
+    expect(definitions(markdown)).toEqual([{ label: 'docs', target: 'first.md', line: 3 }]);
+  });
+
+  it('finds a collapsed reference-style link', () => {
+    const markdown = ['[guide][]', '', '[guide]: docs/guide.md'].join('\n');
+
+    expect(referenceUses(markdown)).toEqual([{ kind: 'link', label: 'guide', line: 1, column: 1 }]);
+  });
+
+  it('finds a collapsed reference-style image', () => {
+    const markdown = ['![diagram][]', '', '[diagram]: images/diagram.png'].join('\n');
+
+    expect(referenceUses(markdown)).toEqual([
+      { kind: 'image', label: 'diagram', line: 1, column: 1 },
+    ]);
+  });
+
+  it('finds a shortcut reference-style link', () => {
+    const markdown = ['See [guide].', '', '[guide]: docs/guide.md'].join('\n');
+
+    expect(referenceUses(markdown)).toEqual([{ kind: 'link', label: 'guide', line: 1, column: 5 }]);
+  });
+
+  it('finds a shortcut reference-style image', () => {
+    const markdown = ['![diagram]', '', '[diagram]: images/diagram.png'].join('\n');
+
+    expect(referenceUses(markdown)).toEqual([
+      { kind: 'image', label: 'diagram', line: 1, column: 1 },
+    ]);
+  });
+
+  it('does not treat a shortcut bracket without a definition as a reference', () => {
+    expect(referenceUses('See [the notes] for details.')).toEqual([]);
+  });
+
+  it('parses angle-bracket destinations and titles in definitions', () => {
+    const markdown = [
+      '[a][guide] and [b][other]',
+      '',
+      '[guide]: <docs/my guide.md> "Guide"',
+      "[other]: docs/other.md 'Other'",
+    ].join('\n');
+
+    expect(definitions(markdown)).toEqual([
+      { label: 'guide', target: 'docs/my guide.md', line: 3 },
+      { label: 'other', target: 'docs/other.md', line: 4 },
+    ]);
+  });
+
+  it('ignores reference definitions inside fenced code', () => {
+    const markdown = ['```md', '[docs]: docs/fake.md', '```', '', '[docs]: docs/real.md'].join('\n');
+
+    expect(definitions(markdown)).toEqual([{ label: 'docs', target: 'docs/real.md', line: 5 }]);
+  });
+
+  it('ignores reference uses inside fenced code', () => {
+    const markdown = [
+      '[docs]: docs/guide.md',
+      '',
+      '```md',
+      '[the guide][docs] and [docs]',
+      '```',
+    ].join('\n');
+
+    expect(referenceUses(markdown)).toEqual([]);
+  });
+
+  it('ignores reference definitions and uses inside indented code', () => {
+    const markdown = [
+      '    [docs]: docs/fake.md',
+      '    [the guide][docs]',
+      '',
+      '[docs]: docs/real.md',
+    ].join('\n');
+
+    expect(definitions(markdown)).toEqual([{ label: 'docs', target: 'docs/real.md', line: 4 }]);
+    expect(referenceUses(markdown)).toEqual([]);
+  });
+
+  it('ignores reference-like text inside inline code', () => {
+    const markdown = [
+      'Use `[guide][docs]` and `[docs]: docs/fake.md` in prose.',
+      '',
+      '[docs]: docs/real.md',
+    ].join('\n');
+
+    expect(referenceUses(markdown)).toEqual([]);
+    expect(definitions(markdown)).toEqual([{ label: 'docs', target: 'docs/real.md', line: 3 }]);
   });
 });

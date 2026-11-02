@@ -121,6 +121,14 @@ describe('heading slugs', () => {
       'the-guide-and-notes',
     ]);
   });
+
+  it('slugs a heading from reference-style link text', () => {
+    expect(collectHeadingSlugs('## Read [the guide][docs]')).toEqual(['read-the-guide']);
+    expect(collectHeadingSlugs('## Read [the guide][]')).toEqual(['read-the-guide']);
+    expect(collectHeadingSlugs('## Read [the guide]')).toEqual(['read-the-guide']);
+    expect(collectHeadingSlugs('## ![diagram][architecture]')).toEqual(['diagram']);
+    expect(collectHeadingSlugs('## ![diagram](images/architecture.png)')).toEqual(['diagram']);
+  });
 });
 
 describe('heading code exclusions', () => {

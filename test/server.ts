@@ -102,17 +102,6 @@ export async function startFixtureServer(): Promise<FixtureServer> {
         response.writeHead(302, { location: 'mailto:owner@example.com' });
         response.end();
         return;
-      case '/redirect-to': {
-        const target = requestUrl.searchParams.get('url');
-        if (target !== null && /^https?:\/\//i.test(target)) {
-          response.writeHead(302, { location: target });
-          response.end();
-        } else {
-          response.writeHead(400, { 'content-type': 'text/plain' });
-          response.end('missing redirect target');
-        }
-        return;
-      }
       case '/not-found':
         response.writeHead(404, { 'content-type': 'text/plain' });
         response.end('not found');

@@ -1,0 +1,13 @@
+name: md-link-check
+description: Check relative links, images and heading anchors in Markdown.
+inputs:
+  paths:
+    description: Newline-delimited files or directories to check, relative to the caller workspace. Blank lines are ignored and values are not shell-expanded.
+    required: true
+  external:
+    description: Set to "true" to check HTTP(S) targets over the network. Defaults to "false", which performs no network access.
+    required: false
+    default: "false"
+runs:
+  using: node24
+  main: action-dist/index.cjs

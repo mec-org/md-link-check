@@ -175,6 +175,24 @@ function parseArgs(args: readonly string[]): ParsedArgs {
   return { json, external, help, paths, error };
 }
 
+/**
+ * Formats the text-mode usage diagnostic, including the one-line usage hint.
+ * The GitHub Action wrapper reuses this so that an invalid action input is
+ * reported exactly like a CLI usage error.
+ */
+export function formatUsageErrorText(message: string): string {
+  return `md-link-check: ${message}\n\n${USAGE_LINE}\nRun "md-link-check --help" for usage and exit codes.\n`;
+}
+
+/**
+ * Formats the text-mode unexpected-failure diagnostic. The raw error object
+ * and stack are never serialized. The GitHub Action wrapper reuses this for
+ * unexpected wrapper failures so they follow the CLI's internal-error policy.
+ */
+export function formatInternalErrorText(error: unknown): string {
+  return `md-link-check: internal error: ${internalErrorDetail(error)}\n`;
+}
+
 function reportUsageError(
   message: string,
   json: boolean,
@@ -186,9 +204,7 @@ function reportUsageError(
     return 2;
   }
 
-  io.writeError(
-    `md-link-check: ${message}\n\n${USAGE_LINE}\nRun "md-link-check --help" for usage and exit codes.\n`,
-  );
+  io.writeError(formatUsageErrorText(message));
   return 2;
 }
 
@@ -203,8 +219,7 @@ function reportInternalError(
   external: boolean,
   io: CliIo,
 ): number {
-  const detail =
-    error instanceof Error && error.message !== '' ? error.message : 'unexpected failure';
+  const detail = internalErrorDetail(error);
   const failure: JsonError = { kind: 'internal', message: detail };
 
   if (json) {
@@ -212,6 +227,10 @@ function reportInternalError(
     return 2;
   }
 
-  io.writeError(`md-link-check: internal error: ${detail}\n`);
+  io.writeError(formatInternalErrorText(error));
   return 2;
+}
+
+function internalErrorDetail(error: unknown): string {
+  return error instanceof Error && error.message !== '' ? error.message : 'unexpected failure';
 }

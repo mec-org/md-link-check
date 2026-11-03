@@ -1,0 +1,11 @@
+{
+  "base": "572d43da06a68c8af0cf61cde5a597c7fa56e8d5",
+  "algorithm": "sha256",
+  "note": "Content hashes of the protected metadata directories at the M7 authorized base. Used by scripts/check-scope.mjs when a shallow CI checkout does not contain the base commit.",
+  "paths": {
+    ".github/workflows/ci.yml": "cad15504dd29dcc0f91dcb3ebb5c0b8a41cda158798c45f41ccb95ceff21f004",
+    ".project/debates/TEMPLATE.md": "7a019e36e335a6093c8a8e57d1ddbc7cea2d2b86a39d0a45ba37ab206fcde0c1",
+    ".project/factory.json": "deb1bcff9fc6883471f47611413c0061774f2e2738f60bfa004e317710a5e256",
+    ".project/state.json": "736cd69160e2ff3aea00f3b0f894552381cab4b33b49298e46c6882d82e82566"
+  }
+}

@@ -4,7 +4,7 @@ md-link-check is an offline CLI that finds broken relative links, images and hea
 
 See [PROJECT.md](PROJECT.md) for the charter, [ROADMAP.md](ROADMAP.md) for the milestones and [CONTRIBUTING.md](CONTRIBUTING.md) for who may open issues and pull requests.
 
-> **Status: v0.1's checks, the M4 raw HTML forms, the M5 opt-in external checking contract and the M6 bounded transport and persistent cache are implemented.** Inline and reference-style links and images, heading anchors, explicit `<a id>`/`<a name>` anchors, raw HTML `<a href>` links and `<img src>` images, stable text output, `--json`, the documented exit codes, and bounded `--external` network checking with a persistent result cache are implemented. The remaining v0.2 milestone (the M7 GitHub Action) is not implemented yet. The release decision is the owner's. See [Current limitations](#current-limitations).
+> **Status: v0.1's checks, the M4 raw HTML forms, the M5 opt-in external checking contract, the M6 bounded transport and persistent cache, and the M7 tagged-ref GitHub Action are implemented.** Inline and reference-style links and images, heading anchors, explicit `<a id>`/`<a name>` anchors, raw HTML `<a href>` links and `<img src>` images, stable text output, `--json`, the documented exit codes, bounded `--external` network checking with a persistent result cache, and a checked-in GitHub Action entrypoint are implemented. The release and tag decisions are the owner's. See [Current limitations](#current-limitations).
 
 ## Requirements
 
@@ -490,9 +490,43 @@ With `--external`, each distinct external target receives a `GET` request, which
 
 The persistent cache also stores the normalized URLs you checked, including queries, together with their outcomes and timestamps, in your user cache directory so a later `--external` run can avoid those requests. The cache contains no response bodies, headers, cookies or credentials, and credential-bearing URLs are never persisted; deleting the cache file clears it. If URLs in your documents contain sensitive query strings, be aware that those URLs are written to that local cache. Without `--external` no cache file is read or written.
 
+## GitHub Action
+
+The repository root contains `action.yml` and a checked-in, self-contained JavaScript entrypoint, `action-dist/index.cjs`, which wraps the same CLI in-process. The action is consumed directly from a tagged ref of this repository; it does not require an npm release, a consumer `npm install`, or a consumer build. The metadata uses GitHub's `node24` JavaScript action runtime.
+
+```yaml
+- uses: mec-org/md-link-check@<tag>
+  with:
+    paths: |
+      README.md
+      docs
+    external: false
+```
+
+`<tag>` is a placeholder: **no release tag exists yet**, and the release and tag decision remains the owner's. Until an immutable release tag is created, use a branch name or commit SHA only for experiments; rely on an immutable tag for a real dependency.
+
+The action has exactly two inputs:
+
+- `paths` (required): newline-delimited Markdown files or directories to check. Each line is trimmed, blank lines are ignored, internal spaces are preserved, and every remaining line becomes exactly one path argument. Values are not shell-expanded, quotes are not evaluated, and globs are not expanded. Paths are passed after the CLI's `--` marker, so a line beginning with `-` is checked as a path rather than treated as an option. Relative paths resolve from the caller's workspace (`GITHUB_WORKSPACE`), not from the action checkout. A directory is searched recursively for `.md` and `.markdown` files exactly as the CLI does.
+- `external` (optional): `true` or `false`, case-insensitive after trimming. The default is `false`, and an empty value means `false`. Any other value is a usage error: the step exits `2` before checking and performs no fetch. `true` adds the CLI's `--external` behavior and may send network requests; see [Opt-in external checking](#opt-in-external-checking). There are no action inputs for timeouts, retries, concurrency, cache policy or JSON output; those remain the CLI's documented contract.
+
+The action prints the CLI's diagnostics and summaries unchanged, including the `file:line: target — reason` form and deterministic ordering, and it adds no wrapper banners or annotations. The step's exit status is the CLI exit status: `0` when checking completed with no broken targets, `1` when at least one broken target was reported, and `2` for a usage error or an internal failure that prevented checking. An unexpected wrapper failure follows the CLI's structured internal-error policy rather than escaping as a stack trace.
+
+The entrypoint is resolved from the action checkout; the process working directory stays the caller's workspace. The action does not install, build or run anything in the caller's repository.
+
+Maintainers must regenerate and commit the entrypoint whenever the action wrapper or any CLI module it bundles changes:
+
+```bash
+npm run build:action   # regenerate action-dist/index.cjs
+npm run check:action   # fail if the committed entrypoint is stale
+npm test               # includes metadata, reproducibility and action invocation tests
+```
+
+Do not edit `action-dist/index.cjs` by hand: the bundle is deterministic, and `npm run check:action` fails when it does not match a fresh build of the committed source. A path containing a newline character cannot be represented in the newline-delimited `paths` input. The repository does not include a workflow that consumes or publishes the action.
+
 ## CI
 
-The CLI can run as a normal CI step after a build. The example below runs inside a checkout of md-link-check itself and checks that checkout's `docs/` tree. There is no published package or GitHub Action, so invoke the built file directly:
+The CLI can run as a normal CI step after a build. The example below runs inside a checkout of md-link-check itself and checks that checkout's `docs/` tree. For a checkout that builds the CLI directly (the action itself is covered in [GitHub Action](#github-action)):
 
 ```yaml
 - uses: actions/checkout@v4
@@ -504,7 +538,7 @@ The CLI can run as a normal CI step after a build. The example below runs inside
 - run: node dist/cli.js docs
 ```
 
-To check a different repository, check out md-link-check at a pinned commit into a subdirectory, build it there, and run `node md-link-check/dist/cli.js <path-to-that-repository>` from the job workspace.
+To check a different repository without building this CLI, use the tagged-ref action from [GitHub Action](#github-action). Alternatively, check out md-link-check at a pinned commit into a subdirectory, build it there, and run `node md-link-check/dist/cli.js <path-to-that-repository>` from the job workspace.
 
 The step fails the job with exit `1` when a broken target is found and exit `2` on a usage error. Add `--json` and redirect standard output when a machine-readable report is needed as an artifact; the report is written before the process exits. The example stays fully offline; add `--external` only when the job may access the network, because without it HTTP(S) targets are counted as skipped and never requested.
 
@@ -529,14 +563,17 @@ The step fails the job with exit `1` when a broken target is found and exit `2` 
 - The external cache is shared by every document checked by the same user account: the key is the network URL only, so the same URL is cached across repositories. There is no CLI flag to inspect, clear or bypass the cache, and no cross-process lock; delete the cache file to clear it. A URL with a sensitive query string is stored locally as part of its cache key, though credential-bearing URLs are never persisted.
 - Redirect handling follows the five statuses listed above. A 3xx response with no `Location` is treated as a successful final response by the existing 200-399 success rule. A redirect target containing credentials is rejected rather than followed.
 - Each HTTP request hop (initial attempt, retry or redirect) gets its own fresh timeout that starts only when the scheduler runs it, so queue wait is never charged. An attempt can therefore take up to `(maxRedirects + 1) × timeout`, and one target up to the attempts ceiling times that bound; a retry starts a new redirect chain.
+- The GitHub Action exposes only `paths` and `external`: it does not expose `--json`, timeout, retry, concurrency or cache settings, and it does not add annotations. A path containing a newline character cannot be represented in the newline-delimited `paths` input. No release tag exists yet; create one only after the owner's release decision, and use an immutable tag rather than a branch for a stable dependency.
 
 ## Development
 
 ```bash
-npm test         # builds, then runs the Vitest suite
+npm test             # builds, then runs the Vitest suite
 npm run typecheck
 npm run build
-npm ls --omit=dev  # runtime dependency check: must be empty
+npm run build:action # regenerate the checked-in action entrypoint
+npm run check:action # fail if the checked-in action entrypoint is stale
+npm ls --omit=dev    # runtime dependency check: must be empty
 ```
 
 The package has no runtime dependencies; TypeScript and Vitest are development dependencies only. The test suite does not contact the public internet: tests that exercise real network behavior use local loopback HTTP fixtures on ephemeral ports, and the rest inject a fetch stub.

@@ -16,7 +16,7 @@ import { BoundedRequestScheduler, MAX_PER_HOST_DELAY_MS } from './scheduler.js';
  */
 export type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
-/** Default timeout for one external request attempt, in milliseconds. */
+/** Default timeout for one external HTTP request (attempt or redirect hop), in milliseconds. */
 export const DEFAULT_EXTERNAL_TIMEOUT_MS = 5_000;
 
 /** Default total attempts per distinct external target: the first plus one retry. */
@@ -478,94 +478,82 @@ async function checkTarget(
 }
 
 /**
- * Performs one attempt: a bounded redirect chain under one fresh timeout. The
- * timeout starts when the first request actually runs, so scheduler queueing is
- * not charged to it, and every redirect hop is scheduled within the same
- * per-host and global limits.
+ * Performs one attempt: a bounded redirect chain in which every hop is a fresh
+ * request with its own timeout. A hop's timer starts only when the scheduler
+ * runs it, so waiting for a global or per-host slot is never charged against
+ * the request. One attempt is bounded by
+ * `(maxRedirects + 1) x timeoutMs`; retries repeat that finite chain.
  */
 async function performAttempt(
   startTarget: string,
   context: TransportContext,
 ): Promise<AttemptObservation> {
-  let controller: AbortController | null = null;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let timedOut = false;
+  let current = startTarget;
+  let redirects = 0;
 
-  const ensureTimeout = (): AbortSignal => {
-    if (controller === null) {
-      controller = new AbortController();
-      timer = setTimeout(() => {
-        timedOut = true;
-        controller?.abort();
-      }, context.timeoutMs);
+  while (true) {
+    const observation = await context.scheduler.run(hostKeyOf(current), async () =>
+      fetchHop(current, context.fetchFunction, context.timeoutMs),
+    );
+
+    if (observation.kind !== 'response') {
+      return observation;
     }
-    return controller.signal;
-  };
 
-  try {
-    let current = startTarget;
-    let redirects = 0;
-
-    while (true) {
-      const observation = await context.scheduler.run(hostKeyOf(current), async () => {
-        const signal = ensureTimeout();
-        if (signal.aborted || timedOut) {
-          return { kind: 'timeout' } satisfies AttemptObservation;
-        }
-        return fetchHop(current, context.fetchFunction, signal);
-      });
-
-      if (timedOut) {
-        return { kind: 'timeout' };
-      }
-      if (observation.kind !== 'response') {
-        return observation;
-      }
-
-      const location = observation.location;
-      if (!isRedirectStatus(observation.status) || location === null) {
-        return observation;
-      }
-
-      if (redirects >= context.maxRedirects) {
-        return {
-          kind: 'redirect-limit',
-          redirects,
-          status: observation.status,
-          finalUrl: observation.finalUrl,
-        };
-      }
-
-      const next = resolveRedirectTarget(location, current);
-      if (next === null) {
-        return {
-          kind: 'invalid-redirect',
-          status: observation.status,
-          finalUrl: observation.finalUrl,
-        };
-      }
-      current = next;
-      redirects += 1;
+    const location = observation.location;
+    if (!isRedirectStatus(observation.status) || location === null) {
+      return observation;
     }
-  } finally {
-    if (timer !== undefined) {
-      clearTimeout(timer);
+
+    if (redirects >= context.maxRedirects) {
+      return {
+        kind: 'redirect-limit',
+        redirects,
+        status: observation.status,
+        finalUrl: observation.finalUrl,
+      };
     }
+
+    const next = resolveRedirectTarget(location, current);
+    if (next === null) {
+      return {
+        kind: 'invalid-redirect',
+        status: observation.status,
+        finalUrl: observation.finalUrl,
+      };
+    }
+    current = next;
+    redirects += 1;
   }
 }
 
-/** Performs one manual-redirect GET request and releases its body. */
+/**
+ * Performs one manual-redirect GET request and releases its body. The fresh
+ * timeout starts when the request runs and stops as soon as headers arrive, so
+ * queued time and response-body release are not charged against it.
+ */
 async function fetchHop(
   target: string,
   fetchFunction: FetchLike,
-  signal: AbortSignal,
+  timeoutMs: number,
 ): Promise<AttemptObservation> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
   try {
     const response = await fetchFunction(target, {
       method: 'GET',
       redirect: 'manual',
-      signal,
+      signal: controller.signal,
     });
+    if (timedOut) {
+      return { kind: 'timeout' };
+    }
+    clearTimeout(timer);
     const finalUrl = response.url === '' ? undefined : response.url;
     let location: string | null = null;
     try {
@@ -580,7 +568,9 @@ async function fetchHop(
     }
     return { kind: 'response', status: response.status, location, finalUrl };
   } catch {
-    return { kind: 'network' };
+    return timedOut ? { kind: 'timeout' } : { kind: 'network' };
+  } finally {
+    clearTimeout(timer);
   }
 }
 

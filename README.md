@@ -316,7 +316,7 @@ These are finite internal defaults in M6, not CLI flags:
 - request method: `GET`, not `HEAD`;
 - success: final status `200` through `399`;
 - failure: final status `400` through `599`, an exhausted timeout or network failure, or a redirect failure;
-- timeout: 5 seconds per attempt, with a fresh `AbortController` signal per attempt. The timer starts when the attempt's first request actually runs and covers the rest of that attempt's redirect chain;
+- timeout: 5 seconds per HTTP request, with a fresh `AbortController` signal per request. The timer starts only when the scheduler runs that request, so waiting for a global or per-host slot is not charged; an attempt is bounded by `(maxRedirects + 1) × 5 s`, and a target by 2 attempts × that bound;
 - attempts: 2 total, the initial attempt plus one retry;
 - retried outcomes: network failures, timeouts, status `408`, status `429`, and status `500` through `599`;
 - not retried: statuses `400` through `499` other than `408` and `429`, and redirect failures;
@@ -528,7 +528,7 @@ The step fails the job with exit `1` when a broken target is found and exit `2` 
 - Without `--external`, HTTP(S) and other external targets are never fetched. With `--external`, only the HTTP(S) URL outcome is validated: fetched page content, authentication, cookies, proxies, `robots.txt`, recursive crawling and other URI schemes remain unsupported.
 - The external cache is shared by every document checked by the same user account: the key is the network URL only, so the same URL is cached across repositories. There is no CLI flag to inspect, clear or bypass the cache, and no cross-process lock; delete the cache file to clear it. A URL with a sensitive query string is stored locally as part of its cache key, though credential-bearing URLs are never persisted.
 - Redirect handling follows the five statuses listed above. A 3xx response with no `Location` is treated as a successful final response by the existing 200-399 success rule. A redirect target containing credentials is rejected rather than followed.
-- The request timeout starts when an attempt's first request actually runs, so time spent waiting for a global or per-host scheduling slot is not counted against the timeout; the queue itself is finite because every target, retry and redirect hop is bounded.
+- Each HTTP request hop (initial attempt, retry or redirect) gets its own fresh timeout that starts only when the scheduler runs it, so queue wait is never charged. An attempt can therefore take up to `(maxRedirects + 1) × timeout`, and one target up to the attempts ceiling times that bound; a retry starts a new redirect chain.
 
 ## Development
 

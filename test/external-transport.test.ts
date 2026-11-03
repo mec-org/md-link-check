@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { checkMarkdownWithExternal } from '../src/checker.js';
 import {
   checkExternalOccurrences,
@@ -336,6 +336,47 @@ describe('bounded redirect handling', () => {
       `${base}/redirect`,
       `${base}/slow`,
     ]);
+  });
+
+  it('redirect hop timeout is not charged for scheduler queue wait', async () => {
+    vi.useFakeTimers();
+    try {
+      const controlled = controlledFetch();
+      const hostCount = 20;
+      const targets = Array.from(
+        { length: hostCount },
+        (_value, index) => `https://host${index}.example/${index}`,
+      );
+      const finalTarget = 'https://final.example/landing';
+      const checking = checkExternalOccurrences(occurrences(targets), {
+        fetch: controlled.fetch,
+        concurrency: 1,
+        timeoutMs: 100,
+      });
+
+      await controlled.waitForRequests(1);
+      controlled.requests[0]?.resolve(302, { location: finalTarget });
+
+      // Drain the rest of the queue while the redirect target's second hop
+      // waits. The accumulated fake time exceeds one hop timeout, so an
+      // attempt-wide timer would abort the healthy redirect.
+      for (let index = 1; index < hostCount; index += 1) {
+        await controlled.waitForRequests(index + 1);
+        await vi.advanceTimersByTimeAsync(20);
+        controlled.requests[index]?.resolve(200);
+      }
+
+      await controlled.waitForRequests(hostCount + 1);
+      expect(controlled.requests[hostCount]?.input).toBe(finalTarget);
+      controlled.requests[hostCount]?.resolve(200);
+
+      const outcome = await checking;
+      expect(outcome.results[0]).toMatchObject({ status: 'succeeded', attempts: 1 });
+      expect(outcome.results.every((result) => result.status === 'succeeded')).toBe(true);
+      expect(controlled.requests).toHaveLength(hostCount + 1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('invalid redirect target becomes a bounded failure', async () => {

@@ -28,7 +28,13 @@ async function captureRun(args: readonly string[], options: RunOptions = {}): Pr
       stderr += text;
     },
   };
-  const exitCode = await run(args, io, options);
+  // Every invocation gets its own temporary cache so no test reads or writes a
+  // developer's real cache and calls within one test stay independent.
+  const external =
+    options.external === undefined
+      ? undefined
+      : { cachePath: join(makeTempRoot(), 'external-v1.json'), ...options.external };
+  const exitCode = await run(args, io, external === undefined ? options : { ...options, external });
   return { exitCode, stdout, stderr };
 }
 
@@ -52,6 +58,7 @@ function makeResult(external: Partial<ExternalSummary> = {}): CheckResult {
     succeeded: 0,
     failed: 0,
     brokenOccurrences: 0,
+    cache: { enabled: false, hits: 0, misses: 0, stale: 0 },
     results: [],
     ...external,
   };
@@ -190,8 +197,8 @@ describe('text reporting', () => {
     const root = makeTempRoot();
     writeFiles(root, {
       'README.md': [
-        '[first](https://example.com/first)',
-        '[second](https://example.com/second)',
+        '[first](https://first.example/first)',
+        '[second](https://second.example/second)',
       ].join('\n'),
     });
     const pending: Array<{ resolve(): void }> = [];
@@ -215,10 +222,10 @@ describe('text reporting', () => {
 
     const lines = result.stdout.trimEnd().split('\n');
     expect(lines[0]).toBe(
-      `${join(root, 'README.md')}:1: https://example.com/first — external HTTP 404`,
+      `${join(root, 'README.md')}:1: https://first.example/first — external HTTP 404`,
     );
     expect(lines[1]).toBe(
-      `${join(root, 'README.md')}:2: https://example.com/second — external HTTP 404`,
+      `${join(root, 'README.md')}:2: https://second.example/second — external HTTP 404`,
     );
   });
 
@@ -384,8 +391,8 @@ describe('additive JSON contract', () => {
     const root = makeTempRoot();
     writeFiles(root, {
       'README.md': [
-        '[first](https://example.com/first)',
-        '[second](https://example.com/second)',
+        '[first](https://first.example/first)',
+        '[second](https://second.example/second)',
       ].join('\n'),
     });
     const pending: Array<{ input: string; resolve(): void }> = [];
@@ -406,8 +413,8 @@ describe('additive JSON contract', () => {
     const document = parseJson((await running).stdout);
 
     expect(document.external.results.map((target) => target.target)).toEqual([
-      'https://example.com/first',
-      'https://example.com/second',
+      'https://first.example/first',
+      'https://second.example/second',
     ]);
   });
 

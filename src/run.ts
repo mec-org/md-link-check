@@ -3,6 +3,7 @@ import {
   checkMarkdownWithExternal,
   type CheckResult,
 } from './checker.js';
+import { resolveExternalCachePath } from './cache.js';
 import { discoverMarkdownFiles, InputError } from './discovery.js';
 import type { ExternalCheckOptions } from './external.js';
 import {
@@ -20,8 +21,8 @@ export interface CliIo {
 }
 
 /**
- * Internal options for tests. Production uses the documented defaults; M5 adds
- * no timeout, retry or concurrency CLI flags.
+ * Internal options for tests. Production uses the documented defaults; M6 adds
+ * no timeout, retry, redirect, concurrency or cache CLI flags.
  */
 export interface RunOptions {
   external?: ExternalCheckOptions;
@@ -49,6 +50,7 @@ function emptyResult(externalEnabled: boolean): CheckResult {
       succeeded: 0,
       failed: 0,
       brokenOccurrences: 0,
+      cache: { enabled: false, hits: 0, misses: 0, stale: 0 },
       results: [],
     },
   };
@@ -93,7 +95,7 @@ export async function run(
   try {
     const files = discoverMarkdownFiles(parsed.paths);
     result = parsed.external
-      ? await checkMarkdownWithExternal(files, options.external)
+      ? await checkMarkdownWithExternal(files, externalOptions(options.external))
       : checkMarkdown(files);
   } catch (error) {
     if (error instanceof InputError) {
@@ -114,6 +116,18 @@ export async function run(
   }
   io.writeOut(formatSummary(result));
   return exitCode;
+}
+
+/**
+ * Resolves the persistent external cache for a real `--external` invocation.
+ * The platform user-cache path is the production default; a test can inject a
+ * temporary path, or `false` to disable persistence for one run. When no safe
+ * user-cache directory exists, caching is disabled rather than writing into the
+ * working tree.
+ */
+function externalOptions(options: ExternalCheckOptions | undefined): ExternalCheckOptions {
+  const cachePath = options?.cachePath ?? resolveExternalCachePath();
+  return { ...options, cachePath: cachePath ?? false };
 }
 
 /**

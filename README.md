@@ -4,7 +4,7 @@ md-link-check is an offline CLI that finds broken relative links, images and hea
 
 See [PROJECT.md](PROJECT.md) for the charter, [ROADMAP.md](ROADMAP.md) for the milestones and [CONTRIBUTING.md](CONTRIBUTING.md) for who may open issues and pull requests.
 
-> **Status: v0.1's checks, the M4 raw HTML forms and the M5 opt-in external checking contract are implemented.** Inline and reference-style links and images, heading anchors, explicit `<a id>`/`<a name>` anchors, raw HTML `<a href>` links and `<img src>` images, stable text output, `--json`, the documented exit codes and `--external` network checking are implemented. The later v0.2 milestones (M6 transport hardening with per-host politeness and a persistent result cache, and the M7 GitHub Action) are not implemented yet. The release decision is the owner's. See [Current limitations](#current-limitations).
+> **Status: v0.1's checks, the M4 raw HTML forms, the M5 opt-in external checking contract and the M6 bounded transport and persistent cache are implemented.** Inline and reference-style links and images, heading anchors, explicit `<a id>`/`<a name>` anchors, raw HTML `<a href>` links and `<img src>` images, stable text output, `--json`, the documented exit codes, and bounded `--external` network checking with a persistent result cache are implemented. The remaining v0.2 milestone (the M7 GitHub Action) is not implemented yet. The release decision is the owner's. See [Current limitations](#current-limitations).
 
 ## Requirements
 
@@ -33,7 +33,7 @@ Pass one or more files or directories. An explicit file is checked as given, eve
 Options:
 
 - `--json` writes one JSON document to standard output instead of text output;
-- `--external` opts in to network checking of `http:` and `https:` targets with Node's built-in `fetch`. Without it, external targets are counted as skipped and the tool makes no network requests; see [Opt-in external checking](#opt-in-external-checking);
+- `--external` opts in to network checking of `http:` and `https:` targets with Node's built-in `fetch`. Without it, external targets are counted as skipped and the tool makes no network requests. With it, requests, retries, redirects and the persistent result cache have documented finite bounds; see [Opt-in external checking](#opt-in-external-checking);
 - `--help` (or `-h`) prints usage and the exit codes and exits `0`;
 - `--` ends option parsing, so a path beginning with `-` can be checked.
 
@@ -72,6 +72,8 @@ Checked 1 file: 1 broken target, 0 external links skipped.
 External checks: 2 occurrences, 2 distinct targets checked (1 succeeded, 1 failed), 1 broken occurrence.
 ```
 
+Text diagnostics and both summary lines keep the M5 shape. Cache hit, miss and stale counts are reported additively only in `--json` (`external.cache`), not in text output.
+
 ## JSON output
 
 `--json` writes exactly one version 1 JSON document to standard output and nothing else. A clean run:
@@ -94,6 +96,12 @@ External checks: 2 occurrences, 2 distinct targets checked (1 succeeded, 1 faile
     "succeeded": 0,
     "failed": 0,
     "brokenOccurrences": 0,
+    "cache": {
+      "enabled": false,
+      "hits": 0,
+      "misses": 0,
+      "stale": 0
+    },
     "results": []
   },
   "diagnostics": []
@@ -144,7 +152,7 @@ The properties are:
 - `summary.filesChecked`: number of unique files checked;
 - `summary.broken`: number of diagnostics (broken targets and undefined reference uses);
 - `summary.externalSkipped`: number of skipped HTTP(S) link and image uses; `0` when `--external` is enabled;
-- `external`: additive external-check summary and per-target results, present in every report; `enabled` is `false` when the run was offline. See [JSON additions](#json-additions);
+- `external`: additive external-check summary and per-target results, present in every report; `enabled` is `false` when the run was offline. `cache` is additive and reports whether persistent caching was configured plus this run's hit, miss and stale-entry counts. See [JSON additions](#json-additions);
 - `diagnostics`: ordered array of `{ file, line, column, kind, target, reason }` objects. `column` is one-based and points at the `[` or `!` of a Markdown reference, or at the `<` of a supported raw HTML tag; `kind` is `"link"` or `"image"`.
 
 A usage error keeps the same top-level shape: `ok` is `false`, `exitCode` is `2`, the summary counts are zero, `diagnostics` is empty, and the top-level `error` field describes the failure (`kind` is `"usage"`, `message` is the error). A usage error is never reported as a link diagnostic. For example:
@@ -171,6 +179,12 @@ A usage error keeps the same top-level shape: `ok` is `false`, `exitCode` is `2`
     "succeeded": 0,
     "failed": 0,
     "brokenOccurrences": 0,
+    "cache": {
+      "enabled": false,
+      "hits": 0,
+      "misses": 0,
+      "stale": 0
+    },
     "results": []
   },
   "diagnostics": []
@@ -289,7 +303,7 @@ External checking is opt-in because it sends requests to the hosts named in the 
 
 Every supported, non-code external occurrence is collected: inline Markdown links and images, resolved reference-style links and images, and raw HTML `<a href>` links and `<img src>` images. Unused reference definitions and external-looking text inside fenced, indented or inline code are not collected. Each occurrence keeps its source file, line, column, link or image kind, and the target exactly as written.
 
-Targets are deduplicated by the exact URL serialization produced by `new URL(target.trim()).href`: scheme and host normalization applies, while paths, queries and fragments are preserved, and `http:` and `https:` targets are never merged. The fragment is part of the deduplication key but is never sent in the HTTP request. One check is shared by every occurrence of that exact normalized target, even when the source spellings differ.
+Targets are deduplicated before any cache lookup or request scheduling. The deduplication key is the normalized URL produced by `new URL(target.trim()).href` with its fragment removed: scheme and host normalization applies, paths and queries stay distinct, `http:` and `https:` targets are never merged, and URLs that differ only by fragment share one check. The fragment is never sent in the HTTP request. The first occurrence determines the normalized `target` reported in structured results, which keeps its fragment when one was written. One check is shared by every occurrence of the same network target, even when the source spellings differ.
 
 If one distinct target fails, every supported source occurrence of it receives a diagnostic, while only one external check was performed. Diagnostics preserve the original target spelling at each source occurrence.
 
@@ -297,22 +311,70 @@ If a target previously classified as HTTP(S) cannot be parsed by `new URL` (for 
 
 ### HTTP contract
 
-These are internal constants in M5, not CLI flags:
+These are finite internal defaults in M6, not CLI flags:
 
 - request method: `GET`, not `HEAD`;
-- redirects: followed using the built-in `fetch` default, and the final response after redirects is judged;
 - success: final status `200` through `399`;
-- failure: final status `400` through `599`, an exhausted timeout, or an exhausted network failure;
-- timeout: 5 seconds per attempt, through a fresh `AbortController` signal per attempt;
+- failure: final status `400` through `599`, an exhausted timeout or network failure, or a redirect failure;
+- timeout: 5 seconds per attempt, with a fresh `AbortController` signal per attempt. The timer starts when the attempt's first request actually runs and covers the rest of that attempt's redirect chain;
 - attempts: 2 total, the initial attempt plus one retry;
 - retried outcomes: network failures, timeouts, status `408`, status `429`, and status `500` through `599`;
-- not retried: other terminal 4xx responses;
-- retry delay: none;
-- concurrency: at most 4 distinct targets checked at once.
+- not retried: statuses `400` through `499` other than `408` and `429`, and redirect failures;
+- retry delay: none (0 ms, the documented ceiling);
+- global concurrency: at most 4 requests in flight across all hosts;
+- per-host politeness: at most 1 request in flight per host origin (scheme, hostname and effective port), with no mandatory per-host start delay (0 ms). An internal testing seam clamps any configured delay to a finite 1-second ceiling;
+- redirects: followed explicitly with `fetch`'s manual redirect mode for statuses `301`, `302`, `303`, `307` and `308` when a `Location` header is present. At most 5 redirects are followed per attempt, so one attempt makes at most 6 requests and one target makes at most 12 requests across its 2 attempts. Relative locations resolve against the current URL; only `http:` and `https:` destinations without credentials are followed. A missing `Location` leaves the 3xx status as the final response, which counts as success under the status rule;
+- scheduling: one bounded scheduler is shared by initial attempts, retries and redirect hops, so all three obey the global and per-host limits. Scheduling is completion-driven and leaves no polling loop, interval or unbounded timer.
 
 A successful final response is not a broken link, including one reached through redirects or a retryable failure that later succeeds. Results and diagnostics are deterministic: distinct target results are ordered by first source occurrence, and diagnostics keep their existing file and document order regardless of response completion order. No partial output is written before all checks finish.
 
-The tool validates the HTTP outcome only. It does not crawl or recursively check fetched pages, validate page content, authenticate, persist cookies, configure a proxy, handle `robots.txt`, or cache results across CLI invocations. It does not send a custom user agent. M6 adds further transport hardening; M5 exposes no timeout, retry or concurrency flags.
+The tool validates the HTTP outcome only. It does not crawl or recursively check fetched pages, validate page content, authenticate, persist cookies, configure a proxy or handle `robots.txt`. It does not send a custom user agent or credentials. The only cross-invocation state is the bounded result cache described next.
+
+### Persistent result cache
+
+`--external` also uses a persistent cache of distinct-target outcomes. Without `--external` the cache is never read or written; a usage error before checking also performs no cache I/O. The cache is not configurable by a CLI flag.
+
+Location, by platform:
+
+- Linux, macOS and other Unix-like systems: `$XDG_CACHE_HOME/md-link-check/external-v1.json` when `XDG_CACHE_HOME` is an absolute path, otherwise `~/.cache/md-link-check/external-v1.json` when the home directory is absolute;
+- Windows: `%LOCALAPPDATA%\md-link-check\external-v1.json`;
+- when no safe user-cache directory can be determined, caching is disabled for that run; the tool never writes a cache under the repository, the current directory or `.project/`.
+
+The cache is one versioned JSON document with schema version `1`:
+
+```json
+{
+  "version": 1,
+  "entries": {
+    "https://example.test/path": {
+      "checkedAt": "2026-11-02T00:00:00.000Z",
+      "outcome": "succeeded",
+      "httpStatus": 200,
+      "finalUrl": "https://example.test/path",
+      "attempts": 1
+    }
+  }
+}
+```
+
+Each entry stores only the normalized cache key, a finite `checkedAt` timestamp, a recognized `outcome` (`succeeded` or `permanent-failure`), an optional bounded `httpStatus`, an optional sanitized `finalUrl`, and a finite `attempts` count. Response bodies, headers, cookies, raw errors, stack traces, source occurrence lists and arbitrary server content are never stored.
+
+The cache key is the same normalized network URL used for deduplication, with the fragment removed: HTTP and HTTPS, hostname, effective port, path and query are all significant, source file paths are never part of the key, and credential-bearing URLs are checked but never persisted or used for a cache hit.
+
+Freshness and invalidation:
+
+- an entry is fresh when its schema is valid, its timestamp is finite, its age is not greater than 24 hours, and its outcome is recognized and cacheable. The boundary is inclusive: an entry exactly 24 hours old is still fresh;
+- a future-dated entry is treated as fresh only within a 60-second clock skew; beyond that it is ignored and refreshed, so a future timestamp cannot stay fresh indefinitely;
+- a stale entry is ignored for results and triggers exactly one live refresh per distinct target. It is replaced only when that refresh yields a cacheable final result;
+- automatic expiry is the 24-hour freshness period. Deleting the cache file clears the cache. A schema-version mismatch invalidates the whole document; changing URL normalization or the schema requires a new version or invalidation. There is no cache-clearing CLI flag.
+
+Cacheable outcomes are successful final responses and permanent, non-retryable 4xx HTTP failures. Timeouts, network failures, exhausted retryable statuses (`408`, `429`, `500`-`599`), redirect failures and unparseable targets are not cached, so a transient outage is never persisted as an authoritative failure. A cache hit recreates the same substantive outcome without a request: it keeps the same status, HTTP status, final URL and failure classification, and its `attempts` is `0` because no request was made in that invocation. A cached permanent failure produces the same broken-link diagnostic and exit code as the equivalent live result.
+
+Malformed, truncated, oversized, wrong-version, wrong-type or unreadable cache data is treated as empty: live checks proceed, checked pages are not turned into findings, no stack trace is printed, and a new valid document may replace the unusable one after successful checking. Invalid individual entries are ignored without discarding valid entries in the same document. A cache write failure is non-fatal: it never adds a diagnostic, changes a clean result into a broken link, or turns a usage success into exit `2`; the run simply does not persist that update.
+
+Writes are bounded and atomic. Parent directories are created with restrictive defaults where supported, a bounded temporary file is written in the same directory and renamed over the cache path, and the temporary file is removed on failure. Stale and excess entries are pruned before serialization, keys are written in sorted order so equivalent cache states produce identical files, and one invocation performs at most one write. Cross-process locking is not implemented, but atomic replacement prevents a partial document from becoming the visible cache.
+
+The documented bounds are a 5 MiB cache file, at most 10,000 entries, and at most 8 KiB for a cache key or final URL. Writers prune stale entries, truncate excess entries (newest first) and shrink the document to fit the byte bound. Readers reject an oversized file without parsing it, cap the number of entries they inspect, and validate every field's type and recognized value.
 
 ### Diagnostics
 
@@ -322,6 +384,8 @@ Every failed source occurrence keeps the existing form `file:line: target — re
 - `external HTTP 500 after 2 attempts` for a retried status that exhausted the attempts;
 - `external request timed out after 2 attempts`;
 - `external network failure after 2 attempts`;
+- `external redirect limit exceeded after 5 redirects` when the redirect ceiling stops an attempt;
+- `external invalid redirect target` when a `Location` is missing a usable HTTP(S) URL;
 - `external invalid URL`.
 
 A successful distinct target produces no broken-link diagnostic.
@@ -360,13 +424,20 @@ The JSON schema keeps `version` 1 and every existing top-level and nested field,
     "succeeded": 1,
     "failed": 1,
     "brokenOccurrences": 2,
+    "cache": {
+      "enabled": true,
+      "hits": 0,
+      "misses": 2,
+      "stale": 0
+    },
     "results": [
       {
         "target": "http://127.0.0.1:12345/ok",
         "status": "succeeded",
         "attempts": 1,
         "httpStatus": 200,
-        "finalUrl": "http://127.0.0.1:12345/ok"
+        "finalUrl": "http://127.0.0.1:12345/ok",
+        "source": "network"
       },
       {
         "target": "http://127.0.0.1:12345/not-found",
@@ -374,7 +445,8 @@ The JSON schema keeps `version` 1 and every existing top-level and nested field,
         "attempts": 1,
         "httpStatus": 404,
         "finalUrl": "http://127.0.0.1:12345/not-found",
-        "failureKind": "http"
+        "failureKind": "http",
+        "source": "network"
       }
     ]
   },
@@ -407,13 +479,16 @@ The external properties are:
 - `external.distinctChecked`: number of distinct normalized targets checked;
 - `external.succeeded`, `external.failed`: distinct target outcomes;
 - `external.brokenOccurrences`: source occurrences reported as broken through failed targets;
-- `external.results`: one object per distinct checked target, in first-occurrence order, containing `target` (the normalized URL or the trimmed unparseable target), `status` (`succeeded` or `failed`), `attempts` (a number), `httpStatus` and `finalUrl` only when a response was received, and `failureKind` only for failures (`http`, `timeout`, `network` or `invalid-url`). No raw error objects are exposed.
+- `external.cache`: additive cache counters, present in every report. `enabled` is whether a persistent cache document was configured; `hits` is the number of distinct targets answered from a fresh entry; `misses` is the number with no usable entry; `stale` is the number whose entry was ignored and refreshed. All are `0` without `--external`, and the absolute cache path is never exposed;
+- `external.results`: one object per distinct checked target, in first-occurrence order, containing `target` (the first occurrence's normalized URL or the trimmed unparseable target), `status` (`succeeded` or `failed`), `attempts` (the number of attempts made in this invocation; `0` for a cache hit), `httpStatus` and `finalUrl` only when a response was received, `failureKind` only for failures (`http`, `timeout`, `network`, `redirect`, `invalid-redirect` or `invalid-url`), `redirectCount` only when a redirect ceiling stopped an attempt, and `source` (`cache` or `network`) only for checked targets when persistent caching is active. No raw error objects are exposed.
 
-`summary.broken` remains the number of diagnostics, so external broken occurrences contribute to it when `--external` is enabled. Existing consumers can ignore `external` and every pre-M5 field keeps its name, type and meaning; the version is not incremented because the change is additive and optional. Usage-error JSON reports the requested `enabled` value with zero counts and an empty `results` array, and never claims that external checks ran. JSON mode writes exactly one document to standard output with no progress text.
+`summary.broken` remains the number of diagnostics, so external broken occurrences contribute to it when `--external` is enabled. Existing consumers can ignore `external` and every pre-M5 field keeps its name, type and meaning; the version is not incremented because the change is additive and optional. Usage-error JSON reports the requested `enabled` value with zero counts, disabled cache counters and an empty `results` array, and never claims that external checks ran. JSON mode writes exactly one document to standard output with no progress text.
 
 ### Privacy and offline use
 
 With `--external`, each distinct external target receives a `GET` request, which reveals the target URL and the runner's IP address to that host and to network intermediaries, subject to their logging and rate limits. Do not enable it for private documents or in an environment that must stay offline. Omitting the flag keeps a run fully offline, so offline CI remains possible. The test suite never contacts the public internet: external-check tests use local loopback HTTP fixtures on ephemeral ports.
+
+The persistent cache also stores the normalized URLs you checked, including queries, together with their outcomes and timestamps, in your user cache directory so a later `--external` run can avoid those requests. The cache contains no response bodies, headers, cookies or credentials, and credential-bearing URLs are never persisted; deleting the cache file clears it. If URLs in your documents contain sensitive query strings, be aware that those URLs are written to that local cache. Without `--external` no cache file is read or written.
 
 ## CI
 
@@ -450,7 +525,10 @@ The step fails the job with exit `1` when a broken target is found and exit `2` 
 - Backslash escapes are used while finding the end of a destination, but are not removed from the destination text before it is checked: `[x](docs/a\)b.md)` is checked for a file named `a\)b.md`.
 - An empty inline destination (`[x]()` or `![x]()`) is ignored. An empty reference definition destination (`[label]: <>`) makes every use resolve to an empty target, which is skipped.
 - YAML front matter is not recognised; link-like syntax inside it is scanned as ordinary Markdown.
-- Without `--external`, HTTP(S) and other external targets are never fetched. With `--external`, only the HTTP(S) URL outcome is validated: fetched page content, authentication, cookies, proxies, `robots.txt`, per-host politeness and cross-invocation caching are not implemented, and other URI schemes are still never fetched.
+- Without `--external`, HTTP(S) and other external targets are never fetched. With `--external`, only the HTTP(S) URL outcome is validated: fetched page content, authentication, cookies, proxies, `robots.txt`, recursive crawling and other URI schemes remain unsupported.
+- The external cache is shared by every document checked by the same user account: the key is the network URL only, so the same URL is cached across repositories. There is no CLI flag to inspect, clear or bypass the cache, and no cross-process lock; delete the cache file to clear it. A URL with a sensitive query string is stored locally as part of its cache key, though credential-bearing URLs are never persisted.
+- Redirect handling follows the five statuses listed above. A 3xx response with no `Location` is treated as a successful final response by the existing 200-399 success rule. A redirect target containing credentials is rejected rather than followed.
+- The request timeout starts when an attempt's first request actually runs, so time spent waiting for a global or per-host scheduling slot is not counted against the timeout; the queue itself is finite because every target, retry and redirect hop is bounded.
 
 ## Development
 

@@ -364,9 +364,9 @@ describe('deduplication and deterministic ordering', () => {
     const file = markdownFile(
       root,
       [
-        '[first](https://example.com/first)',
-        '[second](https://example.com/second)',
-        '[third](https://example.com/third)',
+        '[first](https://first.example/first)',
+        '[second](https://second.example/second)',
+        '[third](https://third.example/third)',
       ].join('\n'),
     );
     const { fetch, pending } = manualFetch();
@@ -379,9 +379,9 @@ describe('deduplication and deterministic ordering', () => {
     const result = await checking;
 
     expect(result.external.results.map((target) => target.target)).toEqual([
-      'https://example.com/first',
-      'https://example.com/second',
-      'https://example.com/third',
+      'https://first.example/first',
+      'https://second.example/second',
+      'https://third.example/third',
     ]);
   });
 
@@ -391,9 +391,9 @@ describe('deduplication and deterministic ordering', () => {
       root,
       [
         '[local one](missing-one.md)',
-        '[external one](https://example.com/slow)',
+        '[external one](https://slow.example/slow)',
         '[local two](missing-two.md)',
-        '[external two](https://example.com/fast)',
+        '[external two](https://fast.example/fast)',
       ].join('\n'),
     );
     const { fetch, pending } = manualFetch();
@@ -407,16 +407,16 @@ describe('deduplication and deterministic ordering', () => {
 
     expect(result.diagnostics.map((diagnostic) => diagnostic.target)).toEqual([
       'missing-one.md',
-      'https://example.com/slow',
+      'https://slow.example/slow',
       'missing-two.md',
-      'https://example.com/fast',
+      'https://fast.example/fast',
     ]);
   });
 
   it('external checks respect the concurrency limit', async () => {
     const root = makeTempRoot();
     const links = Array.from({ length: 10 }, (_value, index) =>
-      `[link ${index}](https://example.com/${index})`,
+      `[link ${index}](https://host${index}.example/${index})`,
     );
     const file = markdownFile(root, links.join('\n'));
 
@@ -438,7 +438,7 @@ describe('deduplication and deterministic ordering', () => {
   it('applies the production default concurrency of four when no option is given', async () => {
     const root = makeTempRoot();
     const links = Array.from({ length: 10 }, (_value, index) =>
-      `[link ${index}](https://example.com/${index})`,
+      `[link ${index}](https://host${index}.example/${index})`,
     );
     const file = markdownFile(root, links.join('\n'));
 

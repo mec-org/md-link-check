@@ -1,5 +1,9 @@
 import type { CheckResult, Diagnostic } from './checker.js';
-import type { ExternalFailureKind } from './external.js';
+import type {
+  ExternalCacheSummary,
+  ExternalFailureKind,
+  ExternalResultSource,
+} from './external.js';
 
 /** The one-line usage hint printed after a text-mode usage error. */
 export const USAGE_LINE = 'Usage: md-link-check [--json] [--external] <path...>';
@@ -20,8 +24,9 @@ Options:
   --external   Also check http: and https: targets over the network. This is
                opt-in: without it, external targets are counted as skipped and
                no request is made. With it, the CLI sends GET requests for each
-               distinct target and may use the network. See README.md for the
-               complete contract.
+               distinct target and may use the network. Requests, retries,
+               redirects and the persistent result cache have documented finite
+               bounds. See README.md for the complete contract.
   --help, -h   Show this help and exit 0.
   --           Treat every remaining argument as a path.
 
@@ -87,6 +92,8 @@ export interface JsonExternalResult {
   httpStatus?: number;
   finalUrl?: string;
   failureKind?: ExternalFailureKind;
+  redirectCount?: number;
+  source?: ExternalResultSource;
 }
 
 /** The additive external-check object in the version 1 JSON document. */
@@ -98,6 +105,7 @@ export interface JsonExternalSummary {
   succeeded: number;
   failed: number;
   brokenOccurrences: number;
+  cache: ExternalCacheSummary;
   results: JsonExternalResult[];
 }
 
@@ -153,6 +161,12 @@ export function createJsonReport(
       succeeded: result.external.succeeded,
       failed: result.external.failed,
       brokenOccurrences: result.external.brokenOccurrences,
+      cache: {
+        enabled: result.external.cache.enabled,
+        hits: result.external.cache.hits,
+        misses: result.external.cache.misses,
+        stale: result.external.cache.stale,
+      },
       results: result.external.results.map((target) => ({
         target: target.target,
         status: target.status,
@@ -160,6 +174,10 @@ export function createJsonReport(
         ...(target.httpStatus === undefined ? {} : { httpStatus: target.httpStatus }),
         ...(target.finalUrl === undefined ? {} : { finalUrl: target.finalUrl }),
         ...(target.failureKind === undefined ? {} : { failureKind: target.failureKind }),
+        ...(target.redirectCount === undefined
+          ? {}
+          : { redirectCount: target.redirectCount }),
+        ...(target.source === undefined ? {} : { source: target.source }),
       })),
     },
     diagnostics: result.diagnostics.map((diagnostic) => ({

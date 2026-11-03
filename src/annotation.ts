@@ -6,6 +6,16 @@
  * reads no environment, inspects no filesystem path and imports no discovery,
  * parser, checking, transport, cache, scheduler or reporting module.
  *
+ * Values come from the structured finding unescaped: the property channel
+ * (`file`) escapes `%`, CR, LF, `:` and `,`; the message channel (target and
+ * reason) escapes `%`, CR and LF. Every source code point is escaped exactly
+ * once, so `%` is replaced first in effect and formatter-generated `%XX`
+ * sequences are never escaped again. Composing `target`, the ` — ` separator
+ * and `reason` before the single message pass keeps ordinary commas and colons
+ * as readable message data. Each finding renders to exactly one command with no
+ * line terminator, and the bounds apply to the escaped text: the source finding,
+ * the CLI diagnostics and the JSON values stay unescaped and unchanged.
+ *
  * M10 defines and tests this formatter only. It is deliberately not imported by
  * the CLI or the action wrapper yet; action emission belongs to a later
  * milestone. It is an internal seam for the action, not a supported library

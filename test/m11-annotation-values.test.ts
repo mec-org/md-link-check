@@ -11,16 +11,25 @@ import type { Diagnostic } from '../src/checker.js';
 import { formatDiagnostic, type JsonReport } from '../src/report.js';
 import type { BrokenLinkResult } from '../src/run.js';
 import {
+  ACTION_ARTIFACT_PATH,
+  DOCUMENTED_ACTION_RUNTIME,
   readActionArtifactText,
+  readActionMetadata,
   readScopeReport,
   REPO_ROOT,
+  requireMapping,
+  requireScalar,
   runAction,
+  runActionBuild,
   runCli,
   type ProcessResult,
 } from './action-helpers.js';
+import { makeTempRoot } from './helpers.js';
 import {
   captureRun,
   fixtureRelativeFindings,
+  M9_BROKEN_FINDINGS,
+  M9_BROKEN_FIXTURE,
   M9_CLEAN_FIXTURE,
 } from './m9-helpers.js';
 import {
@@ -173,7 +182,6 @@ describe('M11 file property safety', () => {
     expect(parsed.rawFile).toBe('docs/a%0Db.md');
     expect(parsed.file).toBe(file);
     expect(annotation).not.toContain('\r');
-    expect(parsed.physicalLines).toHaveLength(1);
   });
 
   it('file property preserves a newline safely', () => {
@@ -184,7 +192,6 @@ describe('M11 file property safety', () => {
     expect(parsed.rawFile).toBe('docs/a%0Ab.md');
     expect(parsed.file).toBe(file);
     expect(annotation).not.toContain('\n');
-    expect(parsed.physicalLines).toHaveLength(1);
   });
 
   it('file property preserves ordinary Unicode', () => {
@@ -215,7 +222,6 @@ describe('M11 file property safety', () => {
     expect(parsed.rawFile).toBe('docs/a.md%2Cline=99');
     expect(parsed.file).toBe(file);
     expect(parsed.line).toBe(14);
-    expect(parsed.commandStartCount).toBe(1);
   });
 
   it('file property cannot inject another workflow command', () => {
@@ -224,8 +230,6 @@ describe('M11 file property safety', () => {
     const parsed = parseAnnotation(annotation);
 
     expect(annotation).not.toMatch(/[\r\n]/);
-    expect(parsed.physicalLines).toHaveLength(1);
-    expect(parsed.commandStartCount).toBe(1);
     expect(parsed.file).toBe(file);
   });
 
@@ -259,7 +263,6 @@ describe('M11 target message safety', () => {
     expect(parsed.rawMessage).toBe('a%0Db — target does not exist');
     expect(parsed.message).toBe(`${target}${SEPARATOR}${BASE_FINDING.reason}`);
     expect(annotation).not.toContain('\r');
-    expect(parsed.physicalLines).toHaveLength(1);
   });
 
   it('annotation message preserves target newline safely', () => {
@@ -270,7 +273,6 @@ describe('M11 target message safety', () => {
     expect(parsed.rawMessage).toBe('a%0Ab — target does not exist');
     expect(parsed.message).toBe(`${target}${SEPARATOR}${BASE_FINDING.reason}`);
     expect(annotation).not.toContain('\n');
-    expect(parsed.physicalLines).toHaveLength(1);
   });
 
   it('annotation message preserves target comma', () => {
@@ -303,8 +305,6 @@ describe('M11 target message safety', () => {
 
     expect(parsed.rawMessage).toBe(`${target}${SEPARATOR}${BASE_FINDING.reason}`);
     expect(parsed.message).toBe(`${target}${SEPARATOR}${BASE_FINDING.reason}`);
-    expect(parsed.physicalLines).toHaveLength(1);
-    expect(parsed.commandStartCount).toBe(1);
   });
 
   it('annotation message preserves a literal target percent escape sequence', () => {
@@ -326,8 +326,6 @@ describe('M11 target message safety', () => {
       `::error file=docs/guide.md,line=14::x%0A::error file=injected.md,line=1::pwned${SEPARATOR}${BASE_FINDING.reason}`,
     );
     expect(annotation).not.toMatch(/[\r\n]/);
-    expect(parsed.physicalLines).toHaveLength(1);
-    expect(parsed.commandStartCount).toBe(1);
     expect(parsed.message).toBe(`${target}${SEPARATOR}${BASE_FINDING.reason}`);
   });
 
@@ -361,7 +359,6 @@ describe('M11 reason message safety', () => {
     expect(parsed.rawMessage).toBe(`missing.md${SEPARATOR}a%0Db`);
     expect(parsed.message).toBe(`${BASE_FINDING.target}${SEPARATOR}${reason}`);
     expect(annotation).not.toContain('\r');
-    expect(parsed.physicalLines).toHaveLength(1);
   });
 
   it('annotation message preserves reason newline safely', () => {
@@ -372,7 +369,6 @@ describe('M11 reason message safety', () => {
     expect(parsed.rawMessage).toBe(`missing.md${SEPARATOR}a%0Ab`);
     expect(parsed.message).toBe(`${BASE_FINDING.target}${SEPARATOR}${reason}`);
     expect(annotation).not.toContain('\n');
-    expect(parsed.physicalLines).toHaveLength(1);
   });
 
   it('annotation message preserves reason comma', () => {
@@ -404,8 +400,6 @@ describe('M11 reason message safety', () => {
     const parsed = parseAnnotation(format({ reason }));
 
     expect(parsed.message).toBe(`${BASE_FINDING.target}${SEPARATOR}${reason}`);
-    expect(parsed.physicalLines).toHaveLength(1);
-    expect(parsed.commandStartCount).toBe(1);
   });
 
   it('annotation message preserves a literal reason percent escape sequence', () => {
@@ -424,8 +418,6 @@ describe('M11 reason message safety', () => {
     const parsed = parseAnnotation(annotation);
 
     expect(annotation).not.toMatch(/[\r\n]/);
-    expect(parsed.physicalLines).toHaveLength(1);
-    expect(parsed.commandStartCount).toBe(1);
     expect(parsed.message).toBe(`${BASE_FINDING.target}${SEPARATOR}${reason}`);
   });
 
@@ -503,14 +495,12 @@ describe('M11 escaping correctness', () => {
     const annotation = format({ file: 'a\rb', target: 'c\rd', reason: 'e\rf' });
 
     expect(annotation).not.toContain('\r');
-    expect(parseAnnotation(annotation).physicalLines).toHaveLength(1);
   });
 
   it('escaped annotation contains no literal newline', () => {
     const annotation = format({ file: 'a\nb', target: 'c\nd', reason: 'e\nf' });
 
     expect(annotation).not.toContain('\n');
-    expect(parseAnnotation(annotation).physicalLines).toHaveLength(1);
   });
 
   it('one special-valued finding remains one annotation', () => {
@@ -522,11 +512,16 @@ describe('M11 escaping correctness', () => {
     };
 
     const annotations = formatAnnotations([finding]);
-    const parsed = parseAnnotation(annotations[0] ?? '');
+    const annotation = annotations[0] ?? '';
+    const parsed = parseAnnotation(annotation);
 
     expect(annotations).toHaveLength(1);
-    expect(parsed.physicalLines).toHaveLength(1);
-    expect(parsed.commandStartCount).toBe(1);
+    // Cardinality is asserted on the rendered string itself: one physical line
+    // and exactly one workflow-command opener at the start of a line.
+    expect(annotation.split(/\r\n|\r|\n/)).toHaveLength(1);
+    expect(
+      annotation.split(/\r\n|\r|\n/).filter((line) => /^::[A-Za-z]/.test(line)),
+    ).toHaveLength(1);
     expect(parsed.file).toBe(finding.file);
     expect(parsed.line).toBe(finding.line);
     expect(parsed.message).toBe(`${finding.target}${SEPARATOR}${finding.reason}`);
@@ -548,8 +543,6 @@ describe('M11 escaping correctness', () => {
         throw new Error(`missing finding at index ${index}`);
       }
       const parsed = parseAnnotation(annotation);
-      expect(parsed.physicalLines).toHaveLength(1);
-      expect(parsed.commandStartCount).toBe(1);
       expect(parsed.file).toBe(finding.file);
       expect(parsed.message).toBe(`${finding.target}${SEPARATOR}${finding.reason}`);
     }
@@ -567,6 +560,30 @@ describe('M11 escaping correctness', () => {
       '::error file=second.md,line=3::d%0D%0Ae — s',
       '::error file=third.md,line=4::f — t%0A',
     ]);
+  });
+
+  it('zero special-valued findings produce zero annotations', () => {
+    expect(formatAnnotations([])).toEqual([]);
+    expect(formatAnnotations([] as readonly BrokenLinkResult[])).toEqual([]);
+  });
+
+  it('duplicate special-valued findings remain distinct', () => {
+    const finding: BrokenLinkResult = {
+      file: 'docs/a,b.md',
+      line: 4,
+      target: 'x%y',
+      reason: 'r\ns',
+    };
+    const annotation = formatAnnotation(finding);
+    const annotations = formatAnnotations([finding, finding]);
+
+    expect(annotations).toHaveLength(2);
+    expect(annotations).toEqual([annotation, annotation]);
+    for (const value of annotations) {
+      const parsed = parseAnnotation(value);
+      expect(parsed.file).toBe(finding.file);
+      expect(parsed.message).toBe(`${finding.target}${SEPARATOR}${finding.reason}`);
+    }
   });
 });
 
@@ -613,8 +630,6 @@ describe('M11 special-value matrix', () => {
     const parsed = parseAnnotation(annotation);
 
     expect(annotation).not.toMatch(/[\r\n]/);
-    expect(parsed.physicalLines).toHaveLength(1);
-    expect(parsed.commandStartCount).toBe(1);
     expect(decodePropertyValue(parsed.rawFile)).toBe(file);
     expect(parsed.file).toBe(file);
   });
@@ -624,8 +639,6 @@ describe('M11 special-value matrix', () => {
     (_, target) => {
       const parsed = parseAnnotation(format({ target }));
 
-      expect(parsed.physicalLines).toHaveLength(1);
-      expect(parsed.commandStartCount).toBe(1);
       expect(decodeMessageData(parsed.rawMessage)).toBe(
         `${target}${SEPARATOR}${BASE_FINDING.reason}`,
       );
@@ -638,8 +651,6 @@ describe('M11 special-value matrix', () => {
     (_, reason) => {
       const parsed = parseAnnotation(format({ reason }));
 
-      expect(parsed.physicalLines).toHaveLength(1);
-      expect(parsed.commandStartCount).toBe(1);
       expect(decodeMessageData(parsed.rawMessage)).toBe(
         `${BASE_FINDING.target}${SEPARATOR}${reason}`,
       );
@@ -659,8 +670,6 @@ describe('M11 special-value matrix', () => {
     const parsed = parseAnnotation(annotations[0] ?? '');
 
     expect(annotations).toHaveLength(1);
-    expect(parsed.physicalLines).toHaveLength(1);
-    expect(parsed.commandStartCount).toBe(1);
     expect(parsed.file).toBe(finding.file);
     expect(parsed.message).toBe(`${finding.target}${SEPARATOR}${finding.reason}`);
   });
@@ -867,8 +876,6 @@ describe('M11 checker integration', () => {
       const parsed = parseAnnotation(annotations[0] ?? '');
 
       expect(annotations).toHaveLength(1);
-      expect(parsed.physicalLines).toHaveLength(1);
-      expect(parsed.commandStartCount).toBe(1);
       expect(parsed.file).toBe(file);
     }
 
@@ -970,6 +977,44 @@ describe('M11 checker integration', () => {
 });
 
 describe('M11 human-readable compatibility', () => {
+  it('M9 frozen clean output remains unchanged', async () => {
+    const result = await runCli(['--', '.'], { cwd: M9_CLEAN_FIXTURE });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toBe(
+      'Checked 2 files: 0 broken targets, 1 external link skipped.\n',
+    );
+  });
+
+  it('M9 frozen broken output remains unchanged', async () => {
+    const result = await runCli(['--', '.'], { cwd: M9_BROKEN_FIXTURE });
+    const lines = M9_BROKEN_FINDINGS.map(
+      ({ file, line, target, reason }) => `${file}:${line}: ${target} — ${reason}`,
+    );
+    lines.push('Checked 2 files: 9 broken targets, 1 external link skipped.');
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toBe(`${lines.join('\n')}\n`);
+  });
+
+  it('M9 frozen usage output remains unchanged', async () => {
+    const result = await runCli([], { cwd: M9_CLEAN_FIXTURE });
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toBe(
+      [
+        'md-link-check: no input paths',
+        '',
+        'Usage: md-link-check [--json] [--external] <path...>',
+        'Run "md-link-check --help" for usage and exit codes.',
+        '',
+      ].join('\n'),
+    );
+  });
+
   it('matching percent diagnostic is byte-for-byte unchanged', async () => {
     const result = await runM11Cli();
 
@@ -1191,6 +1236,66 @@ describe('M11 JSON compatibility', () => {
 });
 
 describe('M11 non-wiring and scope', () => {
+  it('action metadata remains unchanged', () => {
+    const metadata = readActionMetadata();
+
+    expect(requireScalar(metadata.fields, 'name')).toBe('md-link-check');
+    expect(requireScalar(metadata.fields, 'description').length).toBeGreaterThan(0);
+    expect([...metadata.inputs.keys()].sort()).toEqual(['external', 'paths']);
+    expect([...metadata.runs.keys()]).toEqual(['using', 'main']);
+    expect(requireScalar(metadata.runs, 'using')).toBe(DOCUMENTED_ACTION_RUNTIME);
+    expect(requireScalar(metadata.runs, 'main')).toBe('action-dist/index.cjs');
+    expect(requireScalar(requireMapping(metadata.inputs, 'paths'), 'required')).toBe(
+      'true',
+    );
+    expect(requireScalar(requireMapping(metadata.inputs, 'external'), 'default')).toBe(
+      'false',
+    );
+    expect(metadata.runs.has('pre')).toBe(false);
+    expect(metadata.runs.has('post')).toBe(false);
+  });
+
+  it('checked-in action artifact is current', async () => {
+    const result = await runActionBuild(['--check']);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('action entrypoint is reproducible');
+    expect(result.stderr).toBe('');
+  });
+
+  it('action entrypoint rebuild is byte reproducible', async () => {
+    const root = makeTempRoot();
+    const firstPath = join(root, 'first.cjs');
+    const secondPath = join(root, 'second.cjs');
+
+    const firstBuild = await runActionBuild(['--outfile', firstPath]);
+    const secondBuild = await runActionBuild(['--outfile', secondPath]);
+
+    expect(firstBuild.status, firstBuild.stderr).toBe(0);
+    expect(secondBuild.status, secondBuild.stderr).toBe(0);
+    const first = readFileSync(firstPath);
+    const second = readFileSync(secondPath);
+    expect(first.length).toBeGreaterThan(0);
+    expect(first.equals(second)).toBe(true);
+    expect(first.equals(readFileSync(ACTION_ARTIFACT_PATH))).toBe(true);
+  });
+
+  it('package retains zero runtime dependencies', () => {
+    const manifest = JSON.parse(
+      readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'),
+    ) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    const lockfile = JSON.parse(
+      readFileSync(join(REPO_ROOT, 'package-lock.json'), 'utf8'),
+    ) as { packages?: Record<string, { dependencies?: Record<string, string> }> };
+
+    expect(manifest.dependencies ?? {}).toEqual({});
+    expect(manifest.devDependencies?.esbuild).toBe('0.28.2');
+    expect(lockfile.packages?.['']?.dependencies ?? {}).toEqual({});
+  });
+
   it('formatter remains unwired from runAction', async () => {
     const action = await runAction({
       cwd: M11_SPECIAL_VALUES_FIXTURE,

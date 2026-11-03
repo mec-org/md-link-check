@@ -2,6 +2,7 @@ import { readFileSync, statSync, type Stats } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import {
   checkExternalOccurrences,
+  type ExternalCacheSummary,
   type ExternalCheckOptions,
   type ExternalOccurrence,
   type ExternalTargetResult,
@@ -47,6 +48,8 @@ export interface ExternalSummary {
   failed: number;
   /** Number of source occurrences reported as broken through a failed target. */
   brokenOccurrences: number;
+  /** Additive persistent-cache counters; disabled caching reports zeros. */
+  cache: ExternalCacheSummary;
   /** One structured result per distinct checked target, in first-occurrence order. */
   results: ExternalTargetResult[];
 }
@@ -136,6 +139,7 @@ export function checkMarkdown(files: readonly string[]): CheckResult {
       succeeded: 0,
       failed: 0,
       brokenOccurrences: 0,
+      cache: { enabled: false, hits: 0, misses: 0, stale: 0 },
       results: [],
     },
   };
@@ -190,6 +194,7 @@ export async function checkMarkdownWithExternal(
       succeeded,
       failed: outcome.results.length - succeeded,
       brokenOccurrences,
+      cache: outcome.cache,
       results: outcome.results,
     },
   };
@@ -295,6 +300,14 @@ function externalFailureReason(result: ExternalTargetResult): string {
       return `external network failure after ${suffix}`;
     case 'invalid-url':
       return 'external invalid URL';
+    case 'redirect': {
+      const count = result.redirectCount ?? 0;
+      return `external redirect limit exceeded after ${count} ${
+        count === 1 ? 'redirect' : 'redirects'
+      }`;
+    }
+    case 'invalid-redirect':
+      return 'external invalid redirect target';
     default:
       return 'external check failed';
   }

@@ -278,6 +278,7 @@ describe('JSON output', () => {
         succeeded: 0,
         failed: 0,
         brokenOccurrences: 0,
+        cache: { enabled: false, hits: 0, misses: 0, stale: 0 },
         results: [],
       },
       diagnostics: [],

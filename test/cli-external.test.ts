@@ -16,11 +16,20 @@ interface ChildRun {
   stderr: string;
 }
 
-/** Runs the built CLI asynchronously so the in-process fixture can reply. */
-function runCli(cwd: string, args: readonly string[]): Promise<ChildRun> {
+/**
+ * Runs the built CLI asynchronously so the in-process fixture can reply. Each
+ * invocation gets its own temporary XDG cache home so no test touches a real
+ * user cache; cache tests pass a shared home to exercise persistence.
+ */
+function runCli(
+  cwd: string,
+  args: readonly string[],
+  cacheHome: string = makeTempRoot(),
+): Promise<ChildRun> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [cliPath, ...args], {
       cwd,
+      env: { ...process.env, XDG_CACHE_HOME: cacheHome },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '';
@@ -59,7 +68,9 @@ async function captureRun(
       stderr += text;
     },
   };
-  const exitCode = await run(args, io, { external });
+  const exitCode = await run(args, io, {
+    external: { cachePath: join(makeTempRoot(), 'external-v1.json'), ...external },
+  });
   return { exitCode, stdout, stderr };
 }
 

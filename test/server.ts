@@ -17,6 +17,12 @@ export interface FixtureServer {
   readonly url: string;
   /** Requests received so far, in arrival order. */
   readonly requests: readonly FixtureRequest[];
+  /** The number of `/gate` requests currently waiting for `releaseGated()`. */
+  readonly gated: number;
+  /** Resolves once at least `count` `/gate` requests are waiting at the same time. */
+  waitForGated(count: number): Promise<void>;
+  /** Answers every `/gate` request that is currently waiting. */
+  releaseGated(): void;
   /** True once `close()` finished successfully. */
   readonly closed: boolean;
   /** Absolute URL for a fixture path. */
@@ -29,20 +35,71 @@ export interface FixtureServer {
 export async function startFixtureServer(): Promise<FixtureServer> {
   const requests: FixtureRequest[] = [];
   const counters = new Map<string, number>();
+  const gateResponses: Array<() => void> = [];
+  const gateWaiters: Array<{ count: number; resolve: () => void }> = [];
+  let gated = 0;
+
+  const notifyGateWaiters = (): void => {
+    for (let index = gateWaiters.length - 1; index >= 0; index -= 1) {
+      const waiter = gateWaiters[index];
+      if (waiter !== undefined && gated >= waiter.count) {
+        gateWaiters.splice(index, 1);
+        waiter.resolve();
+      }
+    }
+  };
+
   const server = createServer((request, response) => {
-    const path = new URL(request.url ?? '/', 'http://127.0.0.1').pathname;
+    const requestUrl = new URL(request.url ?? '/', 'http://127.0.0.1');
+    const path = requestUrl.pathname;
     requests.push({ method: request.method ?? 'GET', path });
 
     const hit = (counters.get(path) ?? 0) + 1;
     counters.set(path, hit);
+
+    const chain = /^\/chain\/(\d+)$/.exec(path);
+    if (chain !== null) {
+      const remaining = Number(chain[1]);
+      if (remaining > 0) {
+        response.writeHead(302, { location: `/chain/${remaining - 1}` });
+      } else {
+        response.writeHead(200, { 'content-type': 'text/plain' });
+        response.end('ok');
+      }
+      return;
+    }
 
     switch (path) {
       case '/ok':
         response.writeHead(200, { 'content-type': 'text/plain' });
         response.end('ok');
         return;
+      case '/gate':
+        gated += 1;
+        gateResponses.push(() => {
+          response.writeHead(200, { 'content-type': 'text/plain' });
+          response.end('ok');
+        });
+        notifyGateWaiters();
+        return;
       case '/redirect':
         response.writeHead(302, { location: '/ok' });
+        response.end();
+        return;
+      case '/redirect-to-not-found':
+        response.writeHead(302, { location: '/not-found' });
+        response.end();
+        return;
+      case '/redirect-to-slow':
+        response.writeHead(302, { location: '/slow' });
+        response.end();
+        return;
+      case '/redirect-loop':
+        response.writeHead(302, { location: '/redirect-loop' });
+        response.end();
+        return;
+      case '/redirect-bad-location':
+        response.writeHead(302, { location: 'mailto:owner@example.com' });
         response.end();
         return;
       case '/not-found':
@@ -102,6 +159,24 @@ export async function startFixtureServer(): Promise<FixtureServer> {
   return {
     url: baseUrl,
     requests,
+    get gated() {
+      return gated;
+    },
+    waitForGated(count: number): Promise<void> {
+      if (gated >= count) {
+        return Promise.resolve();
+      }
+      return new Promise<void>((resolve) => {
+        gateWaiters.push({ count, resolve });
+      });
+    },
+    releaseGated(): void {
+      const pending = gateResponses.splice(0);
+      gated = 0;
+      for (const respond of pending) {
+        respond();
+      }
+    },
     get closed() {
       return closed;
     },

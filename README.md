@@ -1,10 +1,10 @@
 # md-link-check
 
-md-link-check is an offline CLI that finds broken relative links, images and heading anchors in a repository's Markdown. It is the software factory's pilot app: small, low-stakes, and checked against real docs. v0.1 is a CLI only, with no runtime dependencies.
+md-link-check is an offline CLI that finds broken relative links, images and heading anchors in a repository's Markdown. It is the software factory's pilot app: small, low-stakes, and checked against real docs. v0.2 keeps the v0.1 Markdown checks and adds explicit HTML anchors and raw HTML links and images, opt-in external URL checking with a persistent result cache, and a GitHub Action, still with no runtime dependencies. The package is not published to npm.
 
 See [PROJECT.md](PROJECT.md) for the charter, [ROADMAP.md](ROADMAP.md) for the milestones and [CONTRIBUTING.md](CONTRIBUTING.md) for who may open issues and pull requests.
 
-> **Status: v0.1's checks, the M4 raw HTML forms, the M5 opt-in external checking contract, the M6 bounded transport and persistent cache, and the M7 tagged-ref GitHub Action are implemented.** Inline and reference-style links and images, heading anchors, explicit `<a id>`/`<a name>` anchors, raw HTML `<a href>` links and `<img src>` images, stable text output, `--json`, the documented exit codes, bounded `--external` network checking with a persistent result cache, and a checked-in GitHub Action entrypoint are implemented. The release and tag decisions are the owner's. See [Current limitations](#current-limitations).
+> **Status: the v0.2 interface is implemented and tested in this repository.** Inline and reference-style links and images, heading anchors, explicit `<a id>`/`<a name>` anchors, raw HTML `<a href>` links and `<img src>` images, stable text output, `--json`, the documented exit codes, bounded `--external` network checking with a persistent result cache, and the checked-in tagged-ref GitHub Action entrypoint are implemented. The v0.2 release and tag decisions remain the owner's; no release tag exists yet and the package is not published to npm. See [Non-goals](#non-goals) and [Current limitations](#current-limitations).
 
 ## Requirements
 
@@ -19,6 +19,8 @@ npm run build
 ```
 
 `npm run build` compiles `src/` to `dist/`. To put the `md-link-check` command on your PATH, run `npm link` after building.
+
+The package is not published to npm: there is no npm release and no supported `npm install` of `md-link-check`. Install from a checkout as above, or consume the GitHub Action from a tagged ref without installing anything; see [GitHub Action](#github-action). The package has no runtime dependencies; TypeScript, Vitest and esbuild are development dependencies only.
 
 ## Usage
 
@@ -40,6 +42,27 @@ Options:
 `--json` and `--external` may be repeated; repeated flags are accepted idempotently.
 
 Text mode writes diagnostics and a final summary to standard output. In text mode, usage errors and internal failures are written to standard error. With `--json`, a check run writes only the JSON document to standard output. `--help` always prints the help text to standard output and exits `0`, even when `--json` is also given. The process exit code is the same in both modes.
+
+## Quick start
+
+Given a `docs/` directory whose only Markdown file is `docs/guide.md`:
+
+```markdown
+# Guide
+```
+
+a clean run prints:
+
+```text
+Checked 1 file: 0 broken targets, 0 external links skipped.
+```
+
+If the same file also contains `[API](api.md)` on line 3, and `docs/api.md` does not exist, the run reports one broken target and exits `1`:
+
+```text
+docs/guide.md:3: api.md — target does not exist
+Checked 1 file: 1 broken target, 0 external links skipped.
+```
 
 ## Text output
 
@@ -128,6 +151,12 @@ A broken run fills `diagnostics` in deterministic order:
     "succeeded": 0,
     "failed": 0,
     "brokenOccurrences": 0,
+    "cache": {
+      "enabled": false,
+      "hits": 0,
+      "misses": 0,
+      "stale": 0
+    },
     "results": []
   },
   "diagnostics": [
@@ -541,6 +570,14 @@ The CLI can run as a normal CI step after a build. The example below runs inside
 To check a different repository without building this CLI, use the tagged-ref action from [GitHub Action](#github-action). Alternatively, check out md-link-check at a pinned commit into a subdirectory, build it there, and run `node md-link-check/dist/cli.js <path-to-that-repository>` from the job workspace.
 
 The step fails the job with exit `1` when a broken target is found and exit `2` on a usage error. Add `--json` and redirect standard output when a machine-readable report is needed as an artifact; the report is written before the process exits. The example stays fully offline; add `--external` only when the job may access the network, because without it HTTP(S) targets are counted as skipped and never requested.
+
+## Non-goals
+
+- Publishing the package to npm, or supporting an npm-based installation or an npm-based action distribution. Use a checkout, or consume the action from a tagged ref.
+- Checking HTTP(S) targets unless `--external` is explicitly supplied. The default run is fully offline.
+- Raw HTML processing beyond `<a id>`, `<a name>`, `<a href>` and `<img src>`, including a DOM or browser-equivalent parser.
+- A supported library API; the CLI and the GitHub Action are the supported surfaces.
+- Creating a release tag, publishing a release, or enabling external checks against real internet targets without the owner's decision.
 
 ## Current limitations
 

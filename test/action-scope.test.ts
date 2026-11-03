@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -102,6 +102,37 @@ describe('action scope guard', () => {
       }
     },
   );
+
+
+  it('action scope check rejects github and project changes', () => {
+    // The scope script is plain ESM outside the TypeScript build, and importing
+    // it also runs its repository check. Run the pure matcher in a child and
+    // read only the tagged result line.
+    const scriptUrl = new URL('../scripts/check-scope.mjs', import.meta.url).href;
+    const probe = [
+      `import { findScopeViolations } from ${JSON.stringify(scriptUrl)};`,
+      "console.log('SCOPE=' + JSON.stringify(findScopeViolations([",
+      "  'README.md',",
+      "  '.github/workflows/ci.yml',",
+      "  '.project/state.json',",
+      "  '.github-notes.md',",
+      "  '.projection.json',",
+      '])));',
+    ].join('\n');
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', probe], {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+    });
+    expect(result.status).toBe(0);
+    const resultLine = result.stdout
+      .split('\n')
+      .find((line) => line.startsWith('SCOPE='));
+    expect(resultLine).toBeDefined();
+    expect(JSON.parse((resultLine ?? 'SCOPE=[]').slice('SCOPE='.length))).toEqual([
+      '.github/workflows/ci.yml',
+      '.project/state.json',
+    ]);
+  });
 
   it('action execution does not require npm publication', async () => {
     const root = makeTempRoot();

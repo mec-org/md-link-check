@@ -2292,6 +2292,7 @@ function count(value, noun) {
 }
 
 // src/run.ts
+var NO_DIAGNOSTICS = Object.freeze([]);
 function emptyResult(externalEnabled) {
   return {
     diagnostics: [],
@@ -2315,10 +2316,13 @@ async function run(args, io2, options = {}) {
   const parsed = parseArgs(args);
   if (parsed.help) {
     io2.writeOut(HELP);
-    return 0;
+    return { exitCode: 0, diagnostics: NO_DIAGNOSTICS };
   }
   if (parsed.error !== null) {
-    return reportUsageError(parsed.error, parsed.json, parsed.external, io2);
+    return {
+      exitCode: reportUsageError(parsed.error, parsed.json, parsed.external, io2),
+      diagnostics: NO_DIAGNOSTICS
+    };
   }
   let result;
   try {
@@ -2326,21 +2330,35 @@ async function run(args, io2, options = {}) {
     result = parsed.external ? await checkMarkdownWithExternal(files, externalOptions(options.external)) : checkMarkdown(files);
   } catch (error) {
     if (error instanceof InputError) {
-      return reportUsageError(error.message, parsed.json, parsed.external, io2);
+      return {
+        exitCode: reportUsageError(error.message, parsed.json, parsed.external, io2),
+        diagnostics: NO_DIAGNOSTICS
+      };
     }
-    return reportInternalError(error, parsed.json, parsed.external, io2);
+    return {
+      exitCode: reportInternalError(error, parsed.json, parsed.external, io2),
+      diagnostics: NO_DIAGNOSTICS
+    };
   }
   const exitCode = result.diagnostics.length === 0 ? 0 : 1;
+  const diagnostics = brokenLinkResults(result.diagnostics);
   if (parsed.json) {
     io2.writeOut(formatJson(result, exitCode));
-    return exitCode;
+    return { exitCode, diagnostics };
   }
   for (const diagnostic of result.diagnostics) {
     io2.writeOut(`${formatDiagnostic(diagnostic)}
 `);
   }
   io2.writeOut(formatSummary(result));
-  return exitCode;
+  return { exitCode, diagnostics };
+}
+function brokenLinkResults(diagnostics) {
+  return Object.freeze(
+    diagnostics.map(
+      ({ file, line, target, reason }) => Object.freeze({ file, line, target, reason })
+    )
+  );
 }
 function externalOptions(options) {
   const cachePath = options?.cachePath ?? resolveExternalCachePath();
@@ -2414,7 +2432,7 @@ function internalErrorDetail(error) {
   return error instanceof Error && error.message !== "" ? error.message : "unexpected failure";
 }
 
-// src/action.ts
+// src/action-runner.ts
 var ActionInputError = class extends Error {
 };
 function readActionInputs(environment) {
@@ -2439,7 +2457,7 @@ async function runAction(environment, io2) {
   } catch (error) {
     if (error instanceof ActionInputError) {
       io2.writeError(formatUsageErrorText(error.message));
-      return 2;
+      return { exitCode: 2, diagnostics: [] };
     }
     throw error;
   }
@@ -2463,9 +2481,11 @@ function parseExternal(raw) {
     'invalid action input "external": expected "true" or "false"'
   );
 }
+
+// src/action.ts
 var io = createProcessIo();
-void runAction(process.env, io).then((exitCode) => {
-  process.exitCode = exitCode;
+void runAction(process.env, io).then((result) => {
+  process.exitCode = result.exitCode;
 }).catch((error) => {
   io.writeError(formatInternalErrorText(error));
   process.exitCode = 2;

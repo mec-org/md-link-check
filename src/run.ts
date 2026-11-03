@@ -2,6 +2,7 @@ import {
   checkMarkdown,
   checkMarkdownWithExternal,
   type CheckResult,
+  type Diagnostic,
 } from './checker.js';
 import { resolveExternalCachePath } from './cache.js';
 import { discoverMarkdownFiles, InputError } from './discovery.js';
@@ -19,6 +20,37 @@ export interface CliIo {
   writeOut(text: string): void;
   writeError(text: string): void;
 }
+
+/**
+ * One broken link, as seen by an in-process caller of {@link run}. This is the
+ * narrow CI-facing projection of the checker's diagnostic: the source file, the
+ * one-based source line, the target exactly as written, and the stable reason,
+ * in the checker's existing result order.
+ *
+ * It is an internal seam for the bundled GitHub Action, not a supported
+ * library API. Callers must treat the value as read-only.
+ */
+export interface BrokenLinkResult {
+  readonly file: string;
+  readonly line: number;
+  readonly target: string;
+  readonly reason: string;
+}
+
+/**
+ * The structured outcome of one CLI invocation. The exit code keeps its
+ * documented meaning, and `diagnostics` holds every broken-link finding in the
+ * checker's existing order. A clean, help, usage-error or internal-error run
+ * carries no diagnostics: usage and internal errors are never fabricated as
+ * broken-link findings.
+ */
+export interface RunResult {
+  readonly exitCode: 0 | 1 | 2;
+  readonly diagnostics: readonly BrokenLinkResult[];
+}
+
+/** Shared empty finding list for runs that did not check any links. */
+const NO_DIAGNOSTICS: readonly BrokenLinkResult[] = Object.freeze([]);
 
 /**
  * Internal options for tests. Production uses the documented defaults; M6 adds
@@ -57,7 +89,10 @@ function emptyResult(externalEnabled: boolean): CheckResult {
 }
 
 /**
- * Runs the CLI and returns its exit code:
+ * Runs the CLI and returns its structured result: the exit code plus the
+ * ordered, immutable broken-link findings.
+ *
+ * The exit code is:
  *
  * - 0 when checking completed and no broken target was found;
  * - 1 when checking completed and at least one broken target was found;
@@ -74,21 +109,27 @@ function emptyResult(externalEnabled: boolean): CheckResult {
  * External checking is strictly opt-in through `--external`. Without it no
  * fetch is called and HTTP(S) targets stay counted as skipped. Argument and
  * discovery errors return before any external check can start.
+ *
+ * The findings are a fresh, frozen projection of the checker's diagnostics, so
+ * an in-process caller cannot reorder or mutate the CLI's own result list.
  */
 export async function run(
   args: readonly string[],
   io: CliIo,
   options: RunOptions = {},
-): Promise<number> {
+): Promise<RunResult> {
   const parsed = parseArgs(args);
 
   if (parsed.help) {
     io.writeOut(HELP);
-    return 0;
+    return { exitCode: 0, diagnostics: NO_DIAGNOSTICS };
   }
 
   if (parsed.error !== null) {
-    return reportUsageError(parsed.error, parsed.json, parsed.external, io);
+    return {
+      exitCode: reportUsageError(parsed.error, parsed.json, parsed.external, io),
+      diagnostics: NO_DIAGNOSTICS,
+    };
   }
 
   let result: CheckResult;
@@ -99,23 +140,44 @@ export async function run(
       : checkMarkdown(files);
   } catch (error) {
     if (error instanceof InputError) {
-      return reportUsageError(error.message, parsed.json, parsed.external, io);
+      return {
+        exitCode: reportUsageError(error.message, parsed.json, parsed.external, io),
+        diagnostics: NO_DIAGNOSTICS,
+      };
     }
-    return reportInternalError(error, parsed.json, parsed.external, io);
+    return {
+      exitCode: reportInternalError(error, parsed.json, parsed.external, io),
+      diagnostics: NO_DIAGNOSTICS,
+    };
   }
 
   const exitCode = result.diagnostics.length === 0 ? 0 : 1;
+  const diagnostics = brokenLinkResults(result.diagnostics);
 
   if (parsed.json) {
     io.writeOut(formatJson(result, exitCode));
-    return exitCode;
+    return { exitCode, diagnostics };
   }
 
   for (const diagnostic of result.diagnostics) {
     io.writeOut(`${formatDiagnostic(diagnostic)}\n`);
   }
   io.writeOut(formatSummary(result));
-  return exitCode;
+  return { exitCode, diagnostics };
+}
+
+/**
+ * Projects the checker's diagnostics onto the narrow finding contract and
+ * freezes both the list and each record. A fresh array of fresh objects is
+ * returned, so later in-process consumers (the action's annotation renderer)
+ * cannot reorder or mutate the CLI's own result list.
+ */
+function brokenLinkResults(diagnostics: readonly Diagnostic[]): readonly BrokenLinkResult[] {
+  return Object.freeze(
+    diagnostics.map(({ file, line, target, reason }) =>
+      Object.freeze({ file, line, target, reason }),
+    ),
+  );
 }
 
 /**
@@ -198,7 +260,7 @@ function reportUsageError(
   json: boolean,
   external: boolean,
   io: CliIo,
-): number {
+): 2 {
   if (json) {
     io.writeOut(formatJson(emptyResult(external), 2, { kind: 'usage', message }));
     return 2;
@@ -218,7 +280,7 @@ function reportInternalError(
   json: boolean,
   external: boolean,
   io: CliIo,
-): number {
+): 2 {
   const detail = internalErrorDetail(error);
   const failure: JsonError = { kind: 'internal', message: detail };
 

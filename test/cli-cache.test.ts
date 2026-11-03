@@ -68,7 +68,7 @@ async function captureRun(
       stderr += text;
     },
   };
-  const exitCode = await run(args, io, { external: { cachePath, ...extra } });
+  const { exitCode } = await run(args, io, { external: { cachePath, ...extra } });
   return { exitCode, stdout, stderr };
 }
 

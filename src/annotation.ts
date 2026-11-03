@@ -106,7 +106,7 @@ export function formatAnnotation(finding: BrokenLinkResult): string {
   );
 
   return (
-    `::error file=${file.text},line=${finding.line}::` +
+    `::error file=${file.text},line=${formatSourceLine(finding.line)}::` +
     `${target.text}${separator}${reason.text}`
   );
 }
@@ -164,6 +164,19 @@ function renderBounded(
     text: `${atoms.map((atom) => atom.text).join('')}${TRUNCATION_MARKER}`,
     points: points + TRUNCATION_MARKER.length,
   };
+}
+
+/**
+ * Renders the one-based source line, rejecting values that cannot be a
+ * one-based positive integer. The checker always supplies such a value; this
+ * boundary check keeps a non-type-safe caller from emitting a malformed `line`
+ * property instead of failing clearly.
+ */
+function formatSourceLine(line: number): string {
+  if (!Number.isInteger(line) || line < 1) {
+    throw new RangeError(`invalid broken-link line: ${String(line)}`);
+  }
+  return String(line);
 }
 
 /** Escapes one character for the workflow-command data channel. */

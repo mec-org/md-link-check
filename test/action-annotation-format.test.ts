@@ -7,14 +7,19 @@ import {
   formatAnnotations,
   TRUNCATION_MARKER,
 } from '../src/annotation.js';
+import type { JsonReport } from '../src/report.js';
 import type { BrokenLinkResult } from '../src/run.js';
 import {
+  ACTION_ARTIFACT_PATH,
+  AUTHORIZED_BASE_SHA,
   readActionArtifactText,
   readScopeReport,
   REPO_ROOT,
   runAction,
+  runActionBuild,
   runCli,
 } from './action-helpers.js';
+import { makeTempRoot } from './helpers.js';
 import {
   captureRun,
   fixtureRelativeFindings,
@@ -85,6 +90,18 @@ describe('annotation formatter core', () => {
       '::error file=docs/guide.md,line=1::missing.md — target does not exist',
     );
     expect(parts(format({ line: 42 })).line).toBe('42');
+  });
+
+  it('formatter rejects a line that is not a positive integer', () => {
+    for (const line of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => format({ line })).toThrow(RangeError);
+    }
+  });
+
+  it('formatter renders a large positive source line', () => {
+    expect(parts(format({ line: Number.MAX_SAFE_INTEGER })).line).toBe(
+      String(Number.MAX_SAFE_INTEGER),
+    );
   });
 
   it('annotation message includes the original target', () => {
@@ -596,9 +613,153 @@ describe('M10 compatibility with the M9 structured result', () => {
     expect(result.diagnostics).toEqual([]);
     expect(formatAnnotations(result.diagnostics)).toEqual([]);
   });
+
+  it('M9 frozen human-readable output remains byte-for-byte unchanged', async () => {
+    const result = await runCli(['--', '.'], { cwd: M9_BROKEN_FIXTURE });
+    const diagnosticLines = M9_BROKEN_FINDINGS.map(
+      ({ file, line, target, reason }) => `${file}:${line}: ${target} — ${reason}`,
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toBe(
+      `${[...diagnosticLines, 'Checked 2 files: 9 broken targets, 1 external link skipped.'].join('\n')}\n`,
+    );
+  });
+
+  it('M9 frozen JSON fields remain unchanged', async () => {
+    const result = await runCli(['--json', '--', '.'], { cwd: M9_BROKEN_FIXTURE });
+    const document = JSON.parse(result.stdout) as JsonReport;
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe('');
+    expect(Object.keys(document).sort()).toEqual([
+      'diagnostics',
+      'exitCode',
+      'external',
+      'ok',
+      'summary',
+      'version',
+    ]);
+    expect(document.version).toBe(1);
+    expect(document.ok).toBe(false);
+    expect(document.exitCode).toBe(1);
+    expect(document.summary).toEqual({
+      filesChecked: 2,
+      broken: M9_BROKEN_FINDINGS.length,
+      externalSkipped: 1,
+    });
+    expect(Object.keys(document.summary).sort()).toEqual([
+      'broken',
+      'externalSkipped',
+      'filesChecked',
+    ]);
+    expect(Object.keys(document.external).sort()).toEqual([
+      'brokenOccurrences',
+      'cache',
+      'distinctChecked',
+      'enabled',
+      'failed',
+      'occurrences',
+      'results',
+      'skipped',
+      'succeeded',
+    ]);
+    expect(Object.keys(document.external.cache).sort()).toEqual([
+      'enabled',
+      'hits',
+      'misses',
+      'stale',
+    ]);
+    expect(document.external.enabled).toBe(false);
+    expect(document.external.results).toEqual([]);
+    expect(document.diagnostics).toHaveLength(M9_BROKEN_FINDINGS.length);
+    expect(
+      document.diagnostics.map(({ file, line, target, reason }) => ({
+        file,
+        line,
+        target,
+        reason,
+      })),
+    ).toEqual(M9_BROKEN_FINDINGS);
+    for (const diagnostic of document.diagnostics) {
+      expect(Object.keys(diagnostic).sort()).toEqual([
+        'column',
+        'file',
+        'kind',
+        'line',
+        'reason',
+        'target',
+      ]);
+    }
+  });
+
+  it('M9 exit codes 0 1 and 2 remain unchanged', async () => {
+    const clean = await runCli(['--', '.'], { cwd: M9_CLEAN_FIXTURE });
+    const broken = await runCli(['--', '.'], { cwd: M9_BROKEN_FIXTURE });
+    const usage = await runCli([], { cwd: M9_CLEAN_FIXTURE });
+
+    expect(clean.status).toBe(0);
+    expect(broken.status).toBe(1);
+    expect(usage.status).toBe(2);
+  });
 });
 
 describe('M10 artifact and scope', () => {
+  it('checked-in action artifact is current', async () => {
+    const result = await runActionBuild(['--check']);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('action entrypoint is reproducible');
+    expect(result.stderr).toBe('');
+  });
+
+  it('action entrypoint rebuild is byte reproducible', async () => {
+    const root = makeTempRoot();
+    const firstPath = join(root, 'first.cjs');
+    const secondPath = join(root, 'second.cjs');
+
+    const firstBuild = await runActionBuild(['--outfile', firstPath]);
+    const secondBuild = await runActionBuild(['--outfile', secondPath]);
+
+    expect(firstBuild.status, firstBuild.stderr).toBe(0);
+    expect(secondBuild.status, secondBuild.stderr).toBe(0);
+    const first = readFileSync(firstPath);
+    const second = readFileSync(secondPath);
+    expect(first.length).toBeGreaterThan(0);
+    expect(first.equals(second)).toBe(true);
+    expect(first.equals(readFileSync(ACTION_ARTIFACT_PATH))).toBe(true);
+  });
+
+  it('action reproducibility check leaves no diff', async () => {
+    const artifactBefore = readActionArtifactText();
+    const result = await runActionBuild(['--check']);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toBe('');
+    expect(readActionArtifactText()).toBe(artifactBefore);
+  });
+
+  it('package retains zero runtime dependencies', () => {
+    const manifest = JSON.parse(
+      readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'),
+    ) as { dependencies?: Record<string, string> };
+    const lockfile = JSON.parse(
+      readFileSync(join(REPO_ROOT, 'package-lock.json'), 'utf8'),
+    ) as { packages?: Record<string, { dependencies?: Record<string, string> }> };
+
+    expect(manifest.dependencies ?? {}).toEqual({});
+    expect(lockfile.packages?.['']?.dependencies ?? {}).toEqual({});
+  });
+
+  it('M10 scope report compares against the authorized base', async () => {
+    const report = await readScopeReport();
+
+    expect(report.base).toBe(AUTHORIZED_BASE_SHA);
+    expect(['git-diff', 'baseline-manifest']).toContain(report.mode);
+    expect(report.violations).toEqual([]);
+  });
+
   it('M10 changes no path under github metadata', async () => {
     const report = await readScopeReport();
 

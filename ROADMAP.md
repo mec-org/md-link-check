@@ -35,3 +35,35 @@ Acceptance: a test or repository-local script validates the root action metadata
 ## M8 — v0.2 hardening and real-docs run
 Exercise the complete v0.2 CLI against the owner's `dsh-copilot` documentation, including supported raw HTML forms, while keeping the acceptance run offline unless the owner separately authorizes external network access. Resolve edge cases, update the README with the v0.2 interface, additive output and JSON changes, cache behavior, unsupported forms, action usage by tagged ref, and the unchanged npm non-goal.
 Acceptance: the v0.2 definition of done in PROJECT.md holds; every reported local broken link from the real-docs run is confirmed real; an offline acceptance run requires no network and creates no untracked file in the checked repository; the action validation script passes; CI is green on `main`; neither `.github/` nor `.project/` is changed; the release and tag decision goes to the owner.
+
+## M9 — CI result contract
+Give the action wrapper, in-process, the structured broken-link results it needs for annotations (file, source line, target and reason, in the CLI's result order) without parsing text output and without changing the CLI's human-readable or JSON surfaces. Add regression fixtures that freeze the current CLI output, JSON fields and exit codes before any action rendering is added.
+Acceptance: tests prove the wrapper receives each broken link's file, line, target and reason in result order; the covered human-readable lines are byte-for-byte unchanged; no JSON field is removed or renamed; exit codes 0, 1 and 2 keep their meanings; `action-dist/index.cjs` is current.
+
+## M10 — Workflow-command annotation formatter
+Add a bounded formatter that turns each broken-link result into one GitHub workflow-command annotation with its Markdown file, line and diagnostic message, kept separate from link discovery so local CLI behavior is unchanged. It is not yet wired into the action.
+Acceptance: unit tests prove one annotation per representative broken link with its file, line and message, result order preserved for several findings, and no annotation for zero findings.
+
+## M11 — Safe annotation values
+Escape the values that workflow commands treat specially in annotation messages and properties, so file names, targets and reasons containing such characters keep their meaning and each finding stays one annotation. Target resolution, reasons and ordinary CLI output do not change.
+Acceptance: tests cover file names, targets and reasons with characters workflow commands treat specially; each yields exactly one annotation with its values intact; the matching human-readable diagnostic is unchanged.
+
+## M12 — Action annotation integration
+Emit the annotations from the existing action entrypoint, keeping its `paths` and `external` inputs and printing the CLI's own output unchanged. Regenerate `action-dist/index.cjs` with the existing build script; direct CLI runs stay free of workflow commands.
+Acceptance: action-level tests prove a broken local target prints its unchanged diagnostic plus one file-and-line annotation, a clean run prints neither, direct CLI tests emit no workflow command, and `npm test` confirms `action-dist/index.cjs` is current.
+
+## M13 — Summary-count outputs
+Declare action outputs in `action.yml` for the run's `summary.filesChecked`, `summary.broken` and `summary.externalSkipped`, and publish their values after the run without changing the `paths` or `external` inputs or the printed output.
+Acceptance: tests prove `action.yml` declares the three outputs, published values equal the run's summary counts for clean and broken fixtures, the printed CLI output is unchanged, and `action-dist/index.cjs` is current.
+
+## M14 — Exit and usage interaction
+Keep the established outcomes while annotations and outputs are active: a clean run exits 0, at least one broken link exits 1, a usage error exits 2. Annotations and outputs never replace, suppress or reinterpret the CLI's result.
+Acceptance: action-level tests cover exits 0, 1 and 2; broken-link runs keep their annotations and outputs; usage errors never become broken-link annotations; usage and diagnostic text are unchanged; `action-dist/index.cjs` is current.
+
+## M15 — Offline and external-mode interaction
+Check the CI-facing layer in both action modes, the default offline mode and `external: true`, with every external test using only a local HTTP server fixture. Annotations and outputs follow the CLI's existing result classifications, with no new transport policy.
+Acceptance: tests prove default action runs fetch no HTTP(S) target, external-mode tests use only a local server, terminal external failures exit 1 and produce their annotations and counts, skipped external targets follow the existing default, and `action-dist/index.cjs` is current.
+
+## M16 — v0.3 hardening, documentation and real-docs run
+Add interaction and regression coverage across several files, several findings, images, anchors and external results. Update `README.md` and `docs/` for the annotations, the outputs and the unchanged CLI output, and bring the README's release-tag statements, and the README contract tests that check them, in line with the tags that exist. Run the CLI and the action wrapper offline over the owner's `dsh-copilot` documentation from the root-owned, read-only snapshot `/opt/dsh-factory/snapshots/dsh-copilot@fc98b7b953f59f4e747d14164119770f1777e96d/`, without real-internet checks.
+Acceptance: the v0.3 definition of done in PROJECT.md holds; all tests and builds pass and `action-dist/index.cjs` is current; the offline real-docs run completes, every reported local broken link is confirmed real, and it leaves no untracked file; the milestone changes only `src/`, `test/`, `docs/`, `README.md`, `action.yml` and `action-dist/index.cjs`; CI is green on `main`; the release and tag decision goes to the owner.

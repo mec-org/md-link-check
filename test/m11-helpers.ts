@@ -71,9 +71,6 @@ export interface ParsedAnnotation {
   readonly rawMessage: string;
   /** The decoded message: the bounded `target — reason` text. */
   readonly message: string;
-  readonly physicalLines: readonly string[];
-  /** Lines that begin with a workflow-command opener. */
-  readonly commandStartCount: number;
 }
 
 /** Decodes one property-channel value using an independent implementation. */
@@ -142,7 +139,6 @@ export function parseAnnotation(annotation: string): ParsedAnnotation {
     throw new Error(`annotation line is not a positive integer: ${annotation}`);
   }
 
-  const physicalLines = annotation.split(/\r\n|\r|\n/);
   return {
     annotation,
     rawFile,
@@ -150,10 +146,6 @@ export function parseAnnotation(annotation: string): ParsedAnnotation {
     line,
     rawMessage,
     message: decodeMessageData(rawMessage),
-    physicalLines,
-    commandStartCount: physicalLines.filter((line) =>
-      /^::[A-Za-z][A-Za-z0-9-]* /.test(line),
-    ).length,
   };
 }
 

@@ -1,6 +1,6 @@
 # md-link-check
 
-md-link-check is an offline CLI that finds broken relative links, images and heading anchors in a repository's Markdown. It is the software factory's pilot app: small, low-stakes, and checked against real docs. v0.1 is a CLI only, with no runtime dependencies; v0.2 adds HTML anchors and raw HTML links, opt-in external checks and a GitHub Action, still with no runtime dependencies.
+md-link-check is an offline CLI that finds broken relative links, images and heading anchors in a repository's Markdown. It is the software factory's pilot app: small, low-stakes, and checked against real docs. v0.1 is a CLI only, with no runtime dependencies; v0.2 adds HTML anchors and raw HTML links, opt-in external checks and a GitHub Action, still with no runtime dependencies. v0.3 adds CI-facing results to the GitHub Action: an annotation for each broken link and summary-count outputs, with the CLI unchanged.
 
 Source PRD: [PRD.md](PRD.md)
 
@@ -41,6 +41,16 @@ v0.2 retains all v0.1 behavior and supported Markdown forms, as defined by the v
 
 The human-readable diagnostic remains `file:line: target — reason`. Without `--external`, exit codes remain unchanged: 0 for no broken links, 1 for at least one broken link, and 2 for a usage error. With `--external`, a terminal external HTTP error, timeout or network failure is a broken link and therefore contributes to exit code 1; usage errors still exit 2. The `--json` schema is extended only additively with external-check summary counts and an external-result classification; existing fields are not removed or renamed.
 
+## Scope (v0.3.0)
+
+v0.3 retains all v0.1 and v0.2 behavior and adds CI-facing results to the existing GitHub Action, and nothing else:
+
+- **Annotations:** for each broken-link diagnostic the CLI reports, the action emits one GitHub workflow-command annotation carrying the Markdown file, the source line and the diagnostic message. Values that workflow commands treat specially are escaped, so each finding stays exactly one annotation.
+- **Summary outputs:** the action publishes the run's summary counts as action outputs declared in `action.yml`, one for each existing JSON summary field: `summary.filesChecked`, `summary.broken` and `summary.externalSkipped`.
+- **An unchanged CLI:** the action still prints the CLI's own output line for line; annotations and outputs are additional records. Direct CLI runs emit no workflow command and need no GitHub Actions environment. The `file:line: target — reason` diagnostic, exit codes 0, 1 and 2, the `--json` schema, the CLI options and the action's `paths` and `external` inputs are unchanged.
+
+The default stays fully offline, tests use no real network (external-mode tests use a local HTTP server fixture only), and v0.3 adds no runtime dependency. Every source change regenerates the checked-in `action-dist/index.cjs` with the existing build script.
+
 ## Non-goals
 
 - External URL checking unless `--external` is explicitly supplied.
@@ -52,6 +62,10 @@ The human-readable diagnostic remains `file:line: target — reason`. Without `-
 - A generated workflow, changes under `.github/` or `.project/`, or automatic installation of the action into another repository.
 - An npm release or npm-based action distribution.
 - Publishing a release, creating a release tag, or enabling external checks against real internet targets without the owner's decision.
+- Annotations or workflow commands from direct CLI runs, or any need for a GitHub Actions environment outside the action (v0.3).
+- New action inputs, an ignore or suppression mechanism, or new external transport, cache or retry controls (v0.3).
+- Wider Markdown or raw HTML parsing, such as block quotes, HTML comments, front matter, autolinks or multiline constructs (v0.3).
+- A v0.3 milestone that changes `package.json`, a lockfile, `scripts/`, `PROJECT.md` or `ROADMAP.md`.
 
 ## Canonical terminology
 
@@ -71,6 +85,7 @@ The human-readable diagnostic remains `file:line: target — reason`. Without `-
 - None blocking implementation.
 - Whether and when to publish the package to npm remains an owner decision outside v0.2.
 - Whether and when to create the v0.2 release tag remains an owner decision after the definition of done is satisfied.
+- Whether and when to create the v0.3 release tag remains an owner decision after the v0.3 definition of done is satisfied.
 
 ## Definition of done (v0.1)
 
@@ -95,3 +110,16 @@ When all four hold, the mission stops and the release decision goes to the owner
 10. A fully offline run over the owner's `dsh-copilot` documentation completes, every reported local broken link is confirmed real, and the run leaves no untracked cache or generated file in the checked repository.
 11. The README documents CLI and action usage, `--external`, external failure semantics, additive JSON fields, cache behavior, unsupported HTML forms, the fully offline default, and the absence of an npm release.
 12. CI is green on `main`, no v0.2 milestone changes `.github/` or `.project/`, and the release and tag decision has been handed to the owner.
+
+## Definition of done (v0.3)
+
+1. M9–M16 are merged in order, one issue and one PR each, each within the factory's changed-line limit including `action-dist/index.cjs`.
+2. Action-level tests prove that each broken link reported through the action produces exactly one workflow-command annotation carrying its Markdown file, source line and diagnostic message, in the CLI's result order, and that a clean run produces none.
+3. Tests cover file names, targets and reasons containing characters that workflow commands treat specially; each still produces one annotation with its values intact.
+4. For the covered fixtures, the action still prints the CLI's own output unchanged, line for line; annotations are additional records.
+5. `action.yml` declares the summary-count outputs, and action-level tests prove that their values equal the run's `summary.filesChecked`, `summary.broken` and `summary.externalSkipped` for clean, broken and external-mode fixtures.
+6. Direct CLI runs emit no workflow command and need no GitHub Actions environment.
+7. Exit codes 0, 1 and 2, the CLI options, the `--json` fields and the action's `paths` and `external` inputs are unchanged, with and without `--external`; a usage error never becomes a broken-link annotation.
+8. Tests use no real network; external-mode tests use a local HTTP server fixture only; the default stays offline.
+9. No v0.3 milestone changes `package.json`, a lockfile, `scripts/`, `.github/`, `.project/`, `PROJECT.md` or `ROADMAP.md`; `action-dist/index.cjs` is current at every merge; CI is green on `main`.
+10. The README documents the annotations, the outputs and the unchanged CLI output, and its release-tag statements match the tags that exist; then the v0.3 release and tag decision is handed to the owner.

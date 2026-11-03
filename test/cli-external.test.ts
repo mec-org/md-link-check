@@ -68,7 +68,7 @@ async function captureRun(
       stderr += text;
     },
   };
-  const exitCode = await run(args, io, {
+  const { exitCode } = await run(args, io, {
     external: { cachePath: join(makeTempRoot(), 'external-v1.json'), ...external },
   });
   return { exitCode, stdout, stderr };

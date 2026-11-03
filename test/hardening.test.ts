@@ -48,7 +48,7 @@ async function captureRun(args: readonly string[]): Promise<CapturedRun> {
       stderr += text;
     },
   };
-  const exitCode = await run(args, io);
+  const { exitCode } = await run(args, io);
   return { exitCode, stdout, stderr };
 }
 

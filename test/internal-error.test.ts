@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { JsonReport } from '../src/report.js';
-import { run, type CliIo } from '../src/run.js';
+import { run, type CliIo, type RunResult } from '../src/run.js';
 import { makeTempRoot, writeFiles } from './helpers.js';
 
 // Simulate failures escaping the checking layer. The run() boundary must turn
@@ -16,6 +16,7 @@ vi.mock('../src/checker.js', () => ({
 
 interface CapturedRun {
   exitCode: number;
+  diagnostics: RunResult['diagnostics'];
   stdout: string;
   stderr: string;
 }
@@ -31,8 +32,8 @@ async function captureRun(args: readonly string[]): Promise<CapturedRun> {
       stderr += text;
     },
   };
-  const exitCode = await run(args, io);
-  return { exitCode, stdout, stderr };
+  const { exitCode, diagnostics } = await run(args, io);
+  return { exitCode, diagnostics, stdout, stderr };
 }
 
 function parseJson(stdout: string): JsonReport {
@@ -97,6 +98,19 @@ describe('internal failures stay inside the structured CLI result', () => {
     const result = await captureRun(['--json', '--bogus', fixture()]);
 
     expect(result.exitCode).toBe(2);
+    expect(result.diagnostics).toEqual([]);
     expect(parseJson(result.stdout).error?.kind).toBe('usage');
+  });
+
+  it('internal error is not represented as a broken-link result', async () => {
+    const text = await captureRun([fixture()]);
+    const json = await captureRun(['--json', fixture()]);
+
+    expect(text.exitCode).toBe(2);
+    expect(text.diagnostics).toEqual([]);
+    expect(json.exitCode).toBe(2);
+    expect(json.diagnostics).toEqual([]);
+    expect(parseJson(json.stdout).diagnostics).toEqual([]);
+    expect(parseJson(json.stdout).error?.kind).toBe('internal');
   });
 });

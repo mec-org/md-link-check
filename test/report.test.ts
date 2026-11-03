@@ -34,7 +34,11 @@ async function captureRun(args: readonly string[], options: RunOptions = {}): Pr
     options.external === undefined
       ? undefined
       : { cachePath: join(makeTempRoot(), 'external-v1.json'), ...options.external };
-  const exitCode = await run(args, io, external === undefined ? options : { ...options, external });
+  const { exitCode } = await run(
+    args,
+    io,
+    external === undefined ? options : { ...options, external },
+  );
   return { exitCode, stdout, stderr };
 }
 

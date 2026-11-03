@@ -8,12 +8,19 @@
  * refused. A missing log after a run is executable evidence that the process
  * neither attempted network access nor touched the external cache.
  *
- * The M3 no-fetch test replaced only `globalThis.fetch`; this guard also covers
- * DNS, raw sockets, the HTTP/HTTPS/HTTP2/TLS clients and cache-file I/O, so a
- * regression that reaches for any of them fails the acceptance test instead of
- * silently using the network.
+ * The patches are applied to the CommonJS builtin module objects and then
+ * published to ESM named imports with syncBuiltinESMExports(). This matters
+ * because the built CLI is ESM and imports builtins by name
+ * (`import { openSync } from 'node:fs'`); patching only the CommonJS properties
+ * would not reliably cover those imports.
+ *
+ * The suite proves the guard itself is live with positive controls: an ESM
+ * named-import probe and a real guarded CLI run with `--external` must both
+ * produce guard entries. Negative acceptance runs are only evidence when those
+ * controls pass.
  */
 const fs = require('node:fs');
+const { syncBuiltinESMExports } = require('node:module');
 const { sep } = require('node:path');
 
 const logPath = process.env.MDLC_ACCEPTANCE_GUARD_LOG;
@@ -123,7 +130,26 @@ function isCachePath(value) {
   return filePath === cacheRoot || filePath.startsWith(`${cacheRoot}${sep}`);
 }
 
-const guardedFsMethods = [
+/**
+ * Replaces one path-taking method with a wrapper that refuses the cache root.
+ * Callback APIs receive the original arguments; promise APIs surface the
+ * synchronous throw as a rejected call, matching how the real API behaves when
+ * the guard is not installed.
+ */
+function guardPathMethod(target, method, apiName) {
+  const original = target[method];
+  if (typeof original !== 'function') {
+    return;
+  }
+  target[method] = function guardedPathCall(filePath, ...rest) {
+    if (isCachePath(filePath)) {
+      return record(apiName, filePath);
+    }
+    return original.call(this, filePath, ...rest);
+  };
+}
+
+const syncMethods = [
   'existsSync',
   'readFileSync',
   'openSync',
@@ -139,17 +165,80 @@ const guardedFsMethods = [
   'rmSync',
   'chmodSync',
   'utimesSync',
+  'accessSync',
+  'realpathSync',
+  'opendirSync',
+  'readlinkSync',
+  'symlinkSync',
+  'linkSync',
+  'truncateSync',
+  'mkdtempSync',
 ];
-
-for (const method of guardedFsMethods) {
-  const original = fs[method];
-  if (typeof original !== 'function') {
-    continue;
-  }
-  fs[method] = function guardedFsCall(filePath, ...rest) {
-    if (isCachePath(filePath)) {
-      return record(`fs.${method}`, filePath);
-    }
-    return original.call(this, filePath, ...rest);
-  };
+for (const method of syncMethods) {
+  guardPathMethod(fs, method, `fs.${method}`);
 }
+
+const callbackMethods = [
+  'readFile',
+  'writeFile',
+  'appendFile',
+  'open',
+  'rename',
+  'copyFile',
+  'mkdir',
+  'rm',
+  'unlink',
+  'stat',
+  'lstat',
+  'access',
+  'chmod',
+  'utimes',
+  'readdir',
+  'realpath',
+  'opendir',
+  'readlink',
+  'symlink',
+  'link',
+  'truncate',
+];
+for (const method of callbackMethods) {
+  guardPathMethod(fs, method, `fs.${method}`);
+}
+
+for (const method of [
+  'readFile',
+  'writeFile',
+  'appendFile',
+  'open',
+  'rename',
+  'copyFile',
+  'mkdir',
+  'rm',
+  'unlink',
+  'stat',
+  'lstat',
+  'access',
+  'chmod',
+  'utimes',
+  'readdir',
+  'realpath',
+  'opendir',
+  'readlink',
+  'symlink',
+  'link',
+  'truncate',
+  'mkdtemp',
+]) {
+  if (fs.promises && typeof fs.promises[method] === 'function') {
+    guardPathMethod(fs.promises, method, `fs.promises.${method}`);
+  }
+}
+
+for (const method of ['createReadStream', 'createWriteStream']) {
+  guardPathMethod(fs, method, `fs.${method}`);
+}
+
+// Publish the patched CommonJS properties to ESM named imports of the Node
+// builtins. Without this, the built CLI's `import { openSync } from 'node:fs'`
+// can keep the original binding, making a missing log meaningless.
+syncBuiltinESMExports();

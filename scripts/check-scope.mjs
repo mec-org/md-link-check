@@ -22,7 +22,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** Base commit authorized for the tagged-ref action milestone. */
 export const AUTHORIZED_BASE_SHA = '572d43da06a68c8af0cf61cde5a597c7fa56e8d5';
@@ -244,4 +244,13 @@ function main(argv) {
   process.exitCode = report.violations.length === 0 ? 0 : 1;
 }
 
-main(process.argv.slice(2));
+// Perform the repository check only when this file is executed directly.
+// Importing the module to reach the pure matchers must have no side effects, so
+// a test or tool can use `findScopeViolations`/`inspectScope` safely even when
+// history is shallow or the default base commit is unavailable.
+const isDirectExecution =
+  typeof process.argv[1] === 'string' &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isDirectExecution) {
+  main(process.argv.slice(2));
+}

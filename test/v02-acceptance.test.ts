@@ -6,6 +6,7 @@ import {
   readFileSync,
   readdirSync,
   readlinkSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -152,11 +153,45 @@ function acceptanceEnvironment(repo: AcceptanceRepo): NodeJS.ProcessEnv {
   };
 }
 
+/** Newest modification time among the TypeScript sources. */
+function latestSourceMtimeMs(directory: string): number {
+  let latest = 0;
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const absolutePath = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      latest = Math.max(latest, latestSourceMtimeMs(absolutePath));
+    } else if (entry.isFile() && entry.name.endsWith('.ts')) {
+      latest = Math.max(latest, statSync(absolutePath).mtimeMs);
+    }
+  }
+  return latest;
+}
+
+/**
+ * Proves the acceptance child runs the CLI built from the current sources.
+ * `npm test` builds dist first; this check makes a stale or missing build fail
+ * instead of producing evidence about old code.
+ */
+function assertAcceptanceCliIsFresh(): void {
+  if (!existsSync(CLI_PATH)) {
+    throw new Error('dist/cli.js is missing; run "npm run build" before the acceptance suite');
+  }
+  const cliMtimeMs = statSync(CLI_PATH).mtimeMs;
+  const sourceMtimeMs = latestSourceMtimeMs(join(REPO_ROOT, 'src'));
+  if (cliMtimeMs < sourceMtimeMs) {
+    throw new Error(
+      `dist/cli.js is older than src/ (${cliMtimeMs} < ${sourceMtimeMs}); ` +
+        'run "npm run build" so the acceptance run describes current code',
+    );
+  }
+}
+
 function runGuarded(
   repo: AcceptanceRepo,
   args: readonly string[],
   environment: NodeJS.ProcessEnv = {},
 ): GuardedRun {
+  assertAcceptanceCliIsFresh();
   const result = spawnSync(
     process.execPath,
     ['--require', OFFLINE_GUARD_PATH, CLI_PATH, ...args],
@@ -244,34 +279,87 @@ function parseTextOutput(stdout: string): {
 }
 
 describe('M8 offline acceptance harness', () => {
-  it('the offline guard records fetch DNS and socket attempts', () => {
+  it('the acceptance CLI build is fresh against src', () => {
+    expect(() => assertAcceptanceCliIsFresh()).not.toThrow();
+  });
+
+  it('the offline guard records ESM named builtin accesses', () => {
     const guardLog = join(makeTempRoot(), 'guard.log');
+    const cacheRoot = join(makeTempRoot(), 'cache');
+    const cachePath = join(cacheRoot, 'md-link-check', 'external-v1.json');
+    mkdirSync(dirname(cachePath), { recursive: true });
+    writeFileSync(cachePath, '{"version":1,"entries":{}}\n');
+
+    // ESM named imports are the real risk: the built CLI imports builtins by
+    // name, so only syncBuiltinESMExports() makes the patched properties
+    // visible to these bindings.
     const script = [
-      "const attempts = [];",
-      "for (const attempt of [",
-      "  () => globalThis.fetch('https://example.com/guard'),",
-      "  () => require('node:dns').lookup('example.com', () => {}),",
-      "  () => require('node:net').connect(9, '127.0.0.1'),",
+      "import { readFileSync } from 'node:fs';",
+      "import { readFile } from 'node:fs/promises';",
+      "import { lookup } from 'node:dns';",
+      "import { connect } from 'node:net';",
+      `const target = ${JSON.stringify(cachePath)};`,
+      'const attempts = [];',
+      'for (const attempt of [',
+      "  () => readFileSync(target, 'utf8'),",
+      "  () => readFile(target, 'utf8'),",
+      "  () => lookup('example.com', () => {}),",
+      "  () => connect(9, '127.0.0.1'),",
       ']) {',
       '  try { attempt(); } catch (error) { attempts.push(error.message); }',
       '}',
       'console.log(attempts.length);',
     ].join('\n');
+
     const result = spawnSync(
       process.execPath,
-      ['--require', OFFLINE_GUARD_PATH, '-e', script],
+      ['--require', OFFLINE_GUARD_PATH, '--input-type=module', '-e', script],
       {
-        env: { ...process.env, MDLC_ACCEPTANCE_GUARD_LOG: guardLog },
+        env: {
+          ...process.env,
+          MDLC_ACCEPTANCE_GUARD_LOG: guardLog,
+          MDLC_ACCEPTANCE_CACHE_ROOT: cacheRoot,
+        },
         encoding: 'utf8',
       },
     );
     expect(result.status).toBe(0);
-    expect(result.stdout.trim()).toBe('3');
+    expect(result.stdout.trim()).toBe('4');
     expect(readGuardLog(guardLog).map((entry) => entry.api)).toEqual([
-      'fetch',
+      'fs.readFileSync',
+      'fs.promises.readFile',
       'dns.lookup',
       'net.connect',
     ]);
+  });
+
+  it('the offline guard catches a real CLI cache read and fetch attempt', () => {
+    const repo = makeAcceptanceRepo();
+    writeFiles(repo.root, {
+      'external.md': '# External\n\n[loopback](http://127.0.0.1:9/m8-guard-control)\n',
+    });
+
+    // A positive control: with --external the real built CLI must try to read
+    // the cache and call fetch. The guard refuses both, so a reachable network
+    // is never used; the non-empty log proves the guard is live for the ESM CLI
+    // instead of only for CommonJS require probes.
+    const result = runGuarded(repo, ['--json', '--external', 'external.md']);
+    const entries = readGuardLog(repo.guardLog);
+
+    expect(entries.some((entry) => entry.api.startsWith('fs.'))).toBe(true);
+    expect(entries.some((entry) => entry.api === 'fetch')).toBe(true);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe('');
+    const document = JSON.parse(result.stdout) as {
+      external: {
+        enabled: boolean;
+        failed: number;
+        results: Array<{ failureKind?: string }>;
+      };
+    };
+    expect(document.external.enabled).toBe(true);
+    expect(document.external.failed).toBe(1);
+    expect(document.external.results[0]?.failureKind).toBe('network');
   });
 });
 

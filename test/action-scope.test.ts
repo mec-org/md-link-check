@@ -105,9 +105,9 @@ describe('action scope guard', () => {
 
 
   it('action scope check rejects github and project changes', () => {
-    // The scope script is plain ESM outside the TypeScript build, and importing
-    // it also runs its repository check. Run the pure matcher in a child and
-    // read only the tagged result line.
+    // The scope script is plain ESM outside the TypeScript build. Importing it
+    // is side-effect free, so this child isolates the pure matcher from the
+    // repository-level check (which can fail in a shallow clone).
     const scriptUrl = new URL('../scripts/check-scope.mjs', import.meta.url).href;
     const probe = [
       `import { findScopeViolations } from ${JSON.stringify(scriptUrl)};`,
@@ -124,6 +124,7 @@ describe('action scope guard', () => {
       encoding: 'utf8',
     });
     expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
     const resultLine = result.stdout
       .split('\n')
       .find((line) => line.startsWith('SCOPE='));

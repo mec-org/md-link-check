@@ -108,16 +108,14 @@ export interface ActionRunOptions {
  */
 export async function runAction(options: ActionRunOptions): Promise<ProcessResult> {
   const env: NodeJS.ProcessEnv = { ...process.env };
+  // The runner owns these variables for its own job steps, so a test child
+  // starts from a clean action environment. Explicit overrides are merged last.
   for (const key of Object.keys(env)) {
     if (key.startsWith('INPUT_')) {
       delete env[key];
     }
   }
   delete env.MD_LINK_CHECK_ACTION_FETCH_LOG;
-  // The runner sets GITHUB_OUTPUT for its own job steps; a test child must not
-  // append to that file. Tests that exercise output publication opt in through
-  // `options.env` with a temporary path of their own.
-  delete env.GITHUB_OUTPUT;
 
   for (const [key, value] of Object.entries(options.inputs ?? {})) {
     if (value === undefined) {
@@ -132,6 +130,10 @@ export async function runAction(options: ActionRunOptions): Promise<ProcessResul
   if (options.cacheHome !== undefined) {
     env.XDG_CACHE_HOME = options.cacheHome;
   }
+  // A test child must not append to the runner's own GITHUB_OUTPUT file.
+  // Publication tests opt in through `options.env`, merged immediately below,
+  // with a temporary path of their own.
+  delete env.GITHUB_OUTPUT;
   for (const [key, value] of Object.entries(options.env ?? {})) {
     if (value === undefined) {
       delete env[key];

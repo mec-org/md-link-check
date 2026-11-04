@@ -25,6 +25,7 @@ import {
   runAction as runCommittedAction,
   runActionBuild,
   runCli,
+  runNode,
 } from './action-helpers.js';
 import { makeTempRoot, writeFiles } from './helpers.js';
 import {
@@ -797,6 +798,72 @@ describe('M12 action exit codes', () => {
     } finally {
       await server.close();
     }
+  });
+});
+
+describe('M12 annotation emission failure', () => {
+  it('annotation write failure follows the internal-error contract', async () => {
+    const env: NodeJS.ProcessEnv = { ...process.env, INPUT_PATHS: '.' };
+    // The runner provides GITHUB_OUTPUT to its steps; a test child must never
+    // append to that file.
+    delete env.GITHUB_OUTPUT;
+
+    const result = await runNode(join(REPO_ROOT, 'dist', 'action.js'), [], {
+      cwd: M9_BROKEN_FIXTURE,
+      env,
+      requires: [join(REPO_ROOT, 'test', 'action-write-failure.cjs')],
+    });
+
+    expect(result.timedOut).toBe(false);
+    expect(result.status).toBe(2);
+    // The CLI had already written its complete output when the annotation write
+    // failed; no annotation and no fabricated finding follow.
+    expect(result.stdout).toBe(BROKEN_CLI_TEXT);
+    expect(result.stdout).not.toContain('::error');
+    expect(result.stderr).toContain(
+      'md-link-check: internal error: simulated annotation write failure',
+    );
+    expect(result.stderr).not.toMatch(/^\s+at /m);
+    expect(result.stderr).not.toContain('::error');
+  });
+
+  it('annotation write failure does not resolve with exit 1', async () => {
+    let stdout = '';
+    const io: CliIo = {
+      writeOut: (text) => {
+        if (text.startsWith('::error ')) {
+          throw new Error('simulated annotation write failure');
+        }
+        stdout += text;
+      },
+      writeError: () => undefined,
+    };
+
+    await expect(
+      runSourceAction({ INPUT_PATHS: M9_BROKEN_FIXTURE }, io),
+    ).rejects.toThrow('simulated annotation write failure');
+    expect(stdout).toContain('Checked 2 files: 9 broken targets');
+    expect(stdout).not.toContain('::error');
+  });
+
+  it('annotation formatter failure emits no annotation', () => {
+    const writes: string[] = [];
+    const invalid: BrokenLinkResult = {
+      file: 'README.md',
+      line: 0,
+      target: 'missing.md',
+      reason: 'target does not exist',
+    };
+
+    expect(() =>
+      emitAnnotations([invalid], {
+        writeOut: (text) => {
+          writes.push(text);
+        },
+        writeError: () => undefined,
+      }),
+    ).toThrow(RangeError);
+    expect(writes).toEqual([]);
   });
 });
 

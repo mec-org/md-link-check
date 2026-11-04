@@ -118,6 +118,35 @@ function escapePropertyCharacter(character) {
   return PROPERTY_CHANNEL_ESCAPES.get(character) ?? character;
 }
 
+// src/action-outputs.ts
+var import_promises = require("node:fs/promises");
+var SUMMARY_OUTPUT_NAMES = Object.freeze({
+  filesChecked: "files-checked",
+  broken: "broken",
+  externalSkipped: "external-skipped"
+});
+async function publishSummaryOutputs(summary, environment) {
+  const outputPath = environment.GITHUB_OUTPUT;
+  if (outputPath === void 0 || outputPath === "") {
+    return;
+  }
+  const records = [
+    `${SUMMARY_OUTPUT_NAMES.filesChecked}=${formatCount(summary.filesChecked, "filesChecked")}`,
+    `${SUMMARY_OUTPUT_NAMES.broken}=${formatCount(summary.broken, "broken")}`,
+    `${SUMMARY_OUTPUT_NAMES.externalSkipped}=${formatCount(
+      summary.externalSkipped,
+      "externalSkipped"
+    )}`
+  ].join("\n") + "\n";
+  await (0, import_promises.appendFile)(outputPath, records, "utf8");
+}
+function formatCount(value, field) {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`invalid action summary count "${field}": ${String(value)}`);
+  }
+  return String(value);
+}
+
 // src/checker.ts
 var import_node_fs2 = require("node:fs");
 var import_node_path2 = require("node:path");
@@ -2406,12 +2435,13 @@ async function run(args, io2, options = {}) {
   const parsed = parseArgs(args);
   if (parsed.help) {
     io2.writeOut(HELP);
-    return { exitCode: 0, diagnostics: NO_DIAGNOSTICS };
+    return { exitCode: 0, diagnostics: NO_DIAGNOSTICS, summary: null };
   }
   if (parsed.error !== null) {
     return {
       exitCode: reportUsageError(parsed.error, parsed.json, parsed.external, io2),
-      diagnostics: NO_DIAGNOSTICS
+      diagnostics: NO_DIAGNOSTICS,
+      summary: null
     };
   }
   let result;
@@ -2422,26 +2452,29 @@ async function run(args, io2, options = {}) {
     if (error instanceof InputError) {
       return {
         exitCode: reportUsageError(error.message, parsed.json, parsed.external, io2),
-        diagnostics: NO_DIAGNOSTICS
+        diagnostics: NO_DIAGNOSTICS,
+        summary: null
       };
     }
     return {
       exitCode: reportInternalError(error, parsed.json, parsed.external, io2),
-      diagnostics: NO_DIAGNOSTICS
+      diagnostics: NO_DIAGNOSTICS,
+      summary: null
     };
   }
   const exitCode = result.diagnostics.length === 0 ? 0 : 1;
   const diagnostics = brokenLinkResults(result.diagnostics);
+  const summary = actionSummary(result);
   if (parsed.json) {
     io2.writeOut(formatJson(result, exitCode));
-    return { exitCode, diagnostics };
+    return { exitCode, diagnostics, summary };
   }
   for (const diagnostic of result.diagnostics) {
     io2.writeOut(`${formatDiagnostic(diagnostic)}
 `);
   }
   io2.writeOut(formatSummary(result));
-  return { exitCode, diagnostics };
+  return { exitCode, diagnostics, summary };
 }
 function brokenLinkResults(diagnostics) {
   return Object.freeze(
@@ -2449,6 +2482,10 @@ function brokenLinkResults(diagnostics) {
       ({ file, line, target, reason }) => Object.freeze({ file, line, target, reason })
     )
   );
+}
+function actionSummary(result) {
+  const { filesChecked, broken, externalSkipped } = result;
+  return Object.freeze({ filesChecked, broken, externalSkipped });
 }
 function externalOptions(options) {
   const cachePath = options?.cachePath ?? resolveExternalCachePath();
@@ -2547,12 +2584,15 @@ async function runAction(environment, io2) {
   } catch (error) {
     if (error instanceof ActionInputError) {
       io2.writeError(formatUsageErrorText(error.message));
-      return { exitCode: 2, diagnostics: [] };
+      return { exitCode: 2, diagnostics: [], summary: null };
     }
     throw error;
   }
   const result = await run(buildCommandLine(inputs), io2);
   emitAnnotations(result.diagnostics, io2);
+  if (result.summary !== null) {
+    await publishSummaryOutputs(result.summary, environment);
+  }
   return result;
 }
 function emitAnnotations(findings, io2) {

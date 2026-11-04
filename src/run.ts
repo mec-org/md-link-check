@@ -38,15 +38,35 @@ export interface BrokenLinkResult {
 }
 
 /**
+ * The authoritative summary counts of a completed checking run, projected for
+ * the action's CI-facing outputs. The values are copied verbatim from the
+ * checker's `CheckResult`, never recomputed from diagnostics, annotations,
+ * text or JSON output, or the exit code.
+ *
+ * It is an internal seam for the bundled GitHub Action, not a supported
+ * library API. Callers must treat the value as read-only.
+ */
+export interface ActionSummary {
+  readonly filesChecked: number;
+  readonly broken: number;
+  readonly externalSkipped: number;
+}
+
+/**
  * The structured outcome of one CLI invocation. The exit code keeps its
  * documented meaning, and `diagnostics` holds every broken-link finding in the
  * checker's existing order. A clean, help, usage-error or internal-error run
  * carries no diagnostics: usage and internal errors are never fabricated as
  * broken-link findings.
+ *
+ * `summary` carries the checker's authoritative counts for a completed check,
+ * including a broken one. It is `null` when no checking run completed (help,
+ * usage error or internal failure), so no caller can publish invented counts.
  */
 export interface RunResult {
   readonly exitCode: 0 | 1 | 2;
   readonly diagnostics: readonly BrokenLinkResult[];
+  readonly summary: ActionSummary | null;
 }
 
 /** Shared empty finding list for runs that did not check any links. */
@@ -89,8 +109,9 @@ function emptyResult(externalEnabled: boolean): CheckResult {
 }
 
 /**
- * Runs the CLI and returns its structured result: the exit code plus the
- * ordered, immutable broken-link findings.
+ * Runs the CLI and returns its structured result: the exit code, the ordered,
+ * immutable broken-link findings, and the authoritative summary counts of a
+ * completed check.
  *
  * The exit code is:
  *
@@ -110,8 +131,9 @@ function emptyResult(externalEnabled: boolean): CheckResult {
  * fetch is called and HTTP(S) targets stay counted as skipped. Argument and
  * discovery errors return before any external check can start.
  *
- * The findings are a fresh, frozen projection of the checker's diagnostics, so
- * an in-process caller cannot reorder or mutate the CLI's own result list.
+ * The findings and the summary are fresh, frozen projections of the checker's
+ * result, so an in-process caller cannot reorder or mutate the CLI's own
+ * result list or counts.
  */
 export async function run(
   args: readonly string[],
@@ -122,13 +144,14 @@ export async function run(
 
   if (parsed.help) {
     io.writeOut(HELP);
-    return { exitCode: 0, diagnostics: NO_DIAGNOSTICS };
+    return { exitCode: 0, diagnostics: NO_DIAGNOSTICS, summary: null };
   }
 
   if (parsed.error !== null) {
     return {
       exitCode: reportUsageError(parsed.error, parsed.json, parsed.external, io),
       diagnostics: NO_DIAGNOSTICS,
+      summary: null,
     };
   }
 
@@ -143,27 +166,30 @@ export async function run(
       return {
         exitCode: reportUsageError(error.message, parsed.json, parsed.external, io),
         diagnostics: NO_DIAGNOSTICS,
+        summary: null,
       };
     }
     return {
       exitCode: reportInternalError(error, parsed.json, parsed.external, io),
       diagnostics: NO_DIAGNOSTICS,
+      summary: null,
     };
   }
 
   const exitCode = result.diagnostics.length === 0 ? 0 : 1;
   const diagnostics = brokenLinkResults(result.diagnostics);
+  const summary = actionSummary(result);
 
   if (parsed.json) {
     io.writeOut(formatJson(result, exitCode));
-    return { exitCode, diagnostics };
+    return { exitCode, diagnostics, summary };
   }
 
   for (const diagnostic of result.diagnostics) {
     io.writeOut(`${formatDiagnostic(diagnostic)}\n`);
   }
   io.writeOut(formatSummary(result));
-  return { exitCode, diagnostics };
+  return { exitCode, diagnostics, summary };
 }
 
 /**
@@ -178,6 +204,17 @@ function brokenLinkResults(diagnostics: readonly Diagnostic[]): readonly BrokenL
       Object.freeze({ file, line, target, reason }),
     ),
   );
+}
+
+/**
+ * Copies the checker's authoritative summary counts onto the action-facing
+ * contract and freezes the record. The values are copied, not recomputed from
+ * the findings or formatted output; an in-process action consumer cannot
+ * mutate the checker's own `CheckResult`.
+ */
+function actionSummary(result: CheckResult): ActionSummary {
+  const { filesChecked, broken, externalSkipped } = result;
+  return Object.freeze({ filesChecked, broken, externalSkipped });
 }
 
 /**

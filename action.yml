@@ -8,6 +8,13 @@ inputs:
     description: Set to "true" to check HTTP(S) targets over the network. Defaults to "false", which performs no network access.
     required: false
     default: "false"
+outputs:
+  files-checked:
+    description: Number of Markdown files checked.
+  broken:
+    description: Number of broken-link findings.
+  external-skipped:
+    description: Number of HTTP(S) link and image uses skipped because external checking was not enabled.
 runs:
   using: node24
   main: action-dist/index.cjs

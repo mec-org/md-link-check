@@ -524,7 +524,8 @@ The persistent cache also stores the normalized URLs you checked, including quer
 The repository root contains `action.yml` and a checked-in, self-contained JavaScript entrypoint, `action-dist/index.cjs`, which wraps the same CLI in-process. The action is consumed directly from a tagged ref of this repository; it does not require an npm release, a consumer `npm install`, or a consumer build. The metadata uses GitHub's `node24` JavaScript action runtime.
 
 ```yaml
-- uses: mec-org/md-link-check@<tag>
+- id: links
+  uses: mec-org/md-link-check@<tag>
   with:
     paths: |
       README.md
@@ -539,7 +540,24 @@ The action has exactly two inputs:
 - `paths` (required): newline-delimited Markdown files or directories to check. Each line is trimmed, blank lines are ignored, internal spaces are preserved, and every remaining line becomes exactly one path argument. Values are not shell-expanded, quotes are not evaluated, and globs are not expanded. Paths are passed after the CLI's `--` marker, so a line beginning with `-` is checked as a path rather than treated as an option. Relative paths resolve from the caller's workspace (`GITHUB_WORKSPACE`), not from the action checkout. A directory is searched recursively for `.md` and `.markdown` files exactly as the CLI does.
 - `external` (optional): `true` or `false`, case-insensitive after trimming. The default is `false`, and an empty value means `false`. Any other value is a usage error: the step exits `2` before checking and performs no fetch. `true` adds the CLI's `--external` behavior and may send network requests; see [Opt-in external checking](#opt-in-external-checking). There are no action inputs for timeouts, retries, concurrency, cache policy or JSON output; those remain the CLI's documented contract.
 
-The action prints the CLI's diagnostics and summaries unchanged, including the `file:line: target — reason` form and deterministic ordering. After that complete output it emits one GitHub error annotation per broken-link finding, in the CLI's result order: the annotation carries the Markdown file and the one-based source line, and its message is the finding's target and reason. Each annotation is a separate output line, and annotation values are escaped and bounded as GitHub workflow commands require. A clean run emits no annotation. Usage errors and internal failures keep the CLI's diagnostics and exit codes and are never turned into broken-link annotations. The action declares no outputs. The step's exit status is the CLI exit status: `0` when checking completed with no broken targets, `1` when at least one broken target was reported, and `2` for a usage error or an internal failure that prevented checking. Direct CLI runs emit no workflow command and need no GitHub Actions environment, so the CLI's own text and JSON output stay compatible. An unexpected wrapper failure follows the CLI's structured internal-error policy rather than escaping as a stack trace.
+The action prints the CLI's diagnostics and summaries unchanged, including the `file:line: target — reason` form and deterministic ordering. After that complete output it emits one GitHub error annotation per broken-link finding, in the CLI's result order: the annotation carries the Markdown file and the one-based source line, and its message is the finding's target and reason. Each annotation is a separate output line, and annotation values are escaped and bounded as GitHub workflow commands require. A clean run emits no annotation. Usage errors and internal failures keep the CLI's diagnostics and exit codes and are never turned into broken-link annotations. The step's exit status is the CLI exit status: `0` when checking completed with no broken targets, `1` when at least one broken target was reported, and `2` for a usage error or an internal failure that prevented checking. Direct CLI runs emit no workflow command and need no GitHub Actions environment, so the CLI's own text and JSON output stay compatible. An unexpected wrapper failure follows the CLI's structured internal-error policy rather than escaping as a stack trace.
+
+The action publishes three outputs for every completed check:
+
+- `files-checked`: number of Markdown files checked.
+- `broken`: number of broken-link findings.
+- `external-skipped`: number of HTTP(S) link and image uses skipped because external checking was not enabled.
+
+The values are decimal base-10 strings published through the runner's `GITHUB_OUTPUT` environment file after the CLI output and annotations; they are never printed as log lines. A clean or broken completed check publishes all three, and a broken run still exits `1`. A usage error or an internal failure publishes no outputs rather than invented zeros. When `GITHUB_OUTPUT` is absent or empty, as in a manual local action run outside a hosted runner, publication is skipped and the completed check keeps its unchanged output and exit status. If the output file cannot be appended to, the action follows its internal-error path: it reports the failure and exits `2`, and never turns it into a broken-link finding. The outputs do not replace the CLI diagnostics or annotations. With the step id from the example above, a later step can read them:
+
+```yaml
+- run: |
+    echo "Files checked: ${{ steps.links.outputs.files-checked }}"
+    echo "Broken: ${{ steps.links.outputs.broken }}"
+    echo "External skipped: ${{ steps.links.outputs.external-skipped }}"
+```
+
+Direct CLI runs never read or write `GITHUB_OUTPUT`: the CLI has no GitHub outputs and needs no GitHub Actions environment.
 
 The entrypoint is resolved from the action checkout; the process working directory stays the caller's workspace. The action does not install, build or run anything in the caller's repository.
 
@@ -600,7 +618,7 @@ The step fails the job with exit `1` when a broken target is found and exit `2` 
 - The external cache is shared by every document checked by the same user account: the key is the network URL only, so the same URL is cached across repositories. There is no CLI flag to inspect, clear or bypass the cache, and no cross-process lock; delete the cache file to clear it. A URL with a sensitive query string is stored locally as part of its cache key, though credential-bearing URLs are never persisted.
 - Redirect handling follows the five statuses listed above. A 3xx response with no `Location` is treated as a successful final response by the existing 200-399 success rule. A redirect target containing credentials is rejected rather than followed.
 - Each HTTP request hop (initial attempt, retry or redirect) gets its own fresh timeout that starts only when the scheduler runs it, so queue wait is never charged. An attempt can therefore take up to `(maxRedirects + 1) × timeout`, and one target up to the attempts ceiling times that bound; a retry starts a new redirect chain.
-- The GitHub Action exposes only `paths` and `external`: it does not expose `--json`, timeout, retry, concurrency or cache settings. It emits one GitHub error annotation per broken-link finding after the CLI's own output, declares no outputs, and external checking stays opt-in. A path containing a newline character cannot be represented in the newline-delimited `paths` input. No release tag exists yet; create one only after the owner's release decision, and use an immutable tag rather than a branch for a stable dependency.
+- The GitHub Action exposes only `paths` and `external`: it does not expose `--json`, timeout, retry, concurrency or cache settings. It emits one GitHub error annotation per broken-link finding after the CLI's own output, publishes the three `files-checked`, `broken` and `external-skipped` summary-count outputs described in [GitHub Action](#github-action), and external checking stays opt-in. A path containing a newline character cannot be represented in the newline-delimited `paths` input. No release tag exists yet; create one only after the owner's release decision, and use an immutable tag rather than a branch for a stable dependency.
 
 ## Development
 

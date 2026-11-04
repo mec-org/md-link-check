@@ -1120,10 +1120,11 @@ describe('M12 input and metadata preservation', () => {
     ]);
   });
 
-  it('action metadata adds no output', () => {
+  it('action metadata retains the M12 runtime surface', () => {
     const metadata = readActionMetadata();
 
-    expect(metadata.fields.has('outputs')).toBe(false);
+    // M13 intentionally adds summary-count outputs; M12 still owns the
+    // runtime surface added for annotations.
     expect([...metadata.runs.keys()]).toEqual(['using', 'main']);
   });
 

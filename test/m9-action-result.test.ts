@@ -171,18 +171,17 @@ describe('M9 action wrapper structured results', () => {
     expect(action.stderr).toBe('');
   });
 
-  it('action wrapper emits no action outputs in M9', async () => {
+  it('action wrapper writes no step summary in M9', async () => {
     const root = makeTempRoot();
-    const outputPath = join(root, 'github-output.txt');
 
+    // M13 owns the GITHUB_OUTPUT contract and its tests; M9 only proves that
+    // the action still writes no separate step-summary document.
     const action = await captureAction({
       INPUT_PATHS: M9_CLEAN_FIXTURE,
-      GITHUB_OUTPUT: outputPath,
       GITHUB_STEP_SUMMARY: join(root, 'step-summary.md'),
     });
 
     expect(action.exitCode).toBe(0);
-    expect(existsSync(outputPath)).toBe(false);
     expect(existsSync(join(root, 'step-summary.md'))).toBe(false);
   });
 

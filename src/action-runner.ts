@@ -14,10 +14,13 @@
  * This is the narrowest action-only boundary. After the CLI has completed its
  * checking and written its complete, unchanged diagnostics and summary, the
  * wrapper renders one GitHub workflow-command annotation per structured
- * broken-link finding and writes those lines to standard output. Direct CLI
- * execution never imports this module or the annotation formatter.
+ * broken-link finding and writes those lines to standard output. It then
+ * publishes the checker's authoritative summary counts through the runner's
+ * `GITHUB_OUTPUT` environment file without printing them. Direct CLI execution
+ * never imports this module, the annotation formatter or the output publisher.
  */
 import { formatAnnotations } from './annotation.js';
+import { publishSummaryOutputs } from './action-outputs.js';
 import {
   formatUsageErrorText,
   run,
@@ -69,19 +72,23 @@ export function createProcessIo(): CliIo {
 
 /**
  * Runs the CLI for one action invocation, emits one workflow-command annotation
- * per structured broken-link finding, and returns the CLI's exit code together
- * with the ordered, immutable findings. The findings come directly from the
- * CLI's in-process result; the wrapper never reads, parses or re-renders its
- * own output.
+ * per structured broken-link finding, publishes the completed check's summary
+ * counts to the GitHub output file, and returns the CLI's exit code together
+ * with the ordered, immutable findings and the authoritative summary. The
+ * findings and counts come directly from the CLI's in-process result; the
+ * wrapper never reads, parses or re-renders its own output.
  *
  * The CLI writes its complete diagnostics and summary before this function
  * returns from `run(...)`, so every annotation line lands after the unchanged
  * CLI output. An empty finding list writes nothing, and the exit code is
- * returned exactly as the CLI produced it.
+ * returned exactly as the CLI produced it. Output publication appends its
+ * records after the annotations and resolves before the wrapper returns, so
+ * the values are complete when the action process finishes.
  *
  * An invalid input is reported through the same text-mode usage diagnostic and
  * exit code `2` as a CLI usage error, before any checking or network access
- * starts, and carries no findings.
+ * starts, and carries no findings. A usage or internal failure has no
+ * authoritative summary, so no output records are published.
  */
 export async function runAction(
   environment: NodeJS.ProcessEnv,
@@ -93,13 +100,16 @@ export async function runAction(
   } catch (error) {
     if (error instanceof ActionInputError) {
       io.writeError(formatUsageErrorText(error.message));
-      return { exitCode: 2, diagnostics: [] };
+      return { exitCode: 2, diagnostics: [], summary: null };
     }
     throw error;
   }
 
   const result = await run(buildCommandLine(inputs), io);
   emitAnnotations(result.diagnostics, io);
+  if (result.summary !== null) {
+    await publishSummaryOutputs(result.summary, environment);
+  }
   return result;
 }
 

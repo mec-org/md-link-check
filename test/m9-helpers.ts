@@ -62,6 +62,7 @@ export function fixtureRelativeFindings(
 export interface CapturedRun {
   exitCode: number;
   diagnostics: RunResult['diagnostics'];
+  summary: RunResult['summary'];
   stdout: string;
   stderr: string;
 }
@@ -82,7 +83,13 @@ export async function captureRun(
     },
   };
   const result = await run(args, io, options);
-  return { exitCode: result.exitCode, diagnostics: result.diagnostics, stdout, stderr };
+  return {
+    exitCode: result.exitCode,
+    diagnostics: result.diagnostics,
+    summary: result.summary,
+    stdout,
+    stderr,
+  };
 }
 
 /** One finding parsed from the frozen human-readable diagnostic line. */

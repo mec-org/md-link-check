@@ -111,6 +111,10 @@ export async function runAction(options: ActionRunOptions): Promise<ProcessResul
     }
   }
   delete env.MD_LINK_CHECK_ACTION_FETCH_LOG;
+  // The runner sets GITHUB_OUTPUT for its own job steps; a test child must not
+  // append to that file. Tests that exercise output publication opt in through
+  // `options.env` with a temporary path of their own.
+  delete env.GITHUB_OUTPUT;
 
   for (const [key, value] of Object.entries(options.inputs ?? {})) {
     if (value === undefined) {

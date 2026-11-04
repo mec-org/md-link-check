@@ -10,8 +10,10 @@
  * checkout.
  *
  * The wrapper itself lives in `action-runner.ts` so it can be exercised
- * in-process without triggering this entrypoint's one-shot execution. This file
- * only re-exports the wrapper's surface and starts one action run.
+ * in-process without triggering this entrypoint's one-shot execution. The
+ * wrapper emits the structured findings as workflow-command annotations after
+ * the CLI finishes; this file only re-exports the wrapper's surface, starts one
+ * action run and maps the returned exit code onto the process.
  *
  * This file has no dependency on action-owned assets: the reproducible
  * `action-dist/index.cjs` bundle is self-contained, so no `import.meta.url` or

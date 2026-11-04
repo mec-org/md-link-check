@@ -192,7 +192,11 @@ describe('action exit codes', () => {
     });
     const cliResult = await runCli(['--', '.'], { cwd: root });
 
-    expect(actionResult.stdout).toBe(cliResult.stdout);
+    // M12 appends action-owned annotation lines; CLI-owned bytes are a prefix.
+    expect(actionResult.stdout.startsWith(cliResult.stdout)).toBe(true);
+    expect(actionResult.stdout.slice(cliResult.stdout.length)).toMatch(
+      /^(?:::error [^\n]+\n)+$/,
+    );
     expect(actionResult.stderr).toBe(cliResult.stderr);
   });
 

@@ -316,7 +316,11 @@ describe('action wrapper and working directory', () => {
 
     expect(actionResult.status).toBe(1);
     expect(cliResult.status).toBe(1);
-    expect(actionResult.stdout).toBe(cliResult.stdout);
+    // M12 appends action-owned annotation lines after the unchanged CLI bytes.
+    expect(actionResult.stdout.startsWith(cliResult.stdout)).toBe(true);
+    expect(actionResult.stdout.slice(cliResult.stdout.length)).toMatch(
+      /^(?:::error [^\n]+\n)+$/,
+    );
   });
 
   it('wrapper preserves CLI stderr', async () => {

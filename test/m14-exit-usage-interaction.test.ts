@@ -124,6 +124,12 @@ const USAGE_TEXT = [
 /** The authorized M14 base commit from the milestone packet. */
 const M14_BASE_SHA = 'be1c58084966d8003a48d687b028451c0a7c7b03';
 
+/** The committed M14 plan record that restates the plan criteria. */
+const M14_PLAN_PATH = join(REPO_ROOT, 'docs', 'm14-plan.md');
+
+/** `npm` is `npm.cmd` on Windows; `execFileSync` does not use a shell. */
+const NPM_COMMAND = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+
 interface CapturedAction {
   exitCode: RunResult['exitCode'];
   diagnostics: RunResult['diagnostics'];
@@ -329,6 +335,17 @@ function commitAvailable(sha: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Returns one `## ` section of the plan record, excluding the heading. */
+function planSection(plan: string, heading: string): string {
+  const start = plan.indexOf(heading);
+  if (start === -1) {
+    return '';
+  }
+  const rest = plan.slice(start + heading.length);
+  const next = rest.search(/^## /m);
+  return (next === -1 ? rest : rest.slice(0, next)).trim();
 }
 
 afterEach(() => {
@@ -581,6 +598,33 @@ describe('M14 exit matrix while annotations and outputs are active', () => {
   });
 });
 
+describe('M14 plan evidence', () => {
+  it('M14 plan restates the exact clean HEAD and the one-day scope', () => {
+    const plan = readFileSync(M14_PLAN_PATH, 'utf8');
+
+    expect(plan).toContain(`\`${M14_BASE_SHA}\``);
+    expect(plan).toContain('Exact starting `HEAD`');
+    expect(plan).toMatch(/Starting worktree: clean/i);
+    expect(plan).toMatch(
+      /one focused pull request of approximately one day of work/i,
+    );
+  });
+
+  it('M14 plan states assumptions confidence and the facts that could change it', () => {
+    const plan = readFileSync(M14_PLAN_PATH, 'utf8');
+    const headings = [
+      '## Assumptions',
+      '## Confidence',
+      '## Facts that could change the plan',
+    ];
+
+    for (const heading of headings) {
+      expect(plan).toContain(heading);
+      expect(planSection(plan, heading).length).toBeGreaterThan(120);
+    }
+  });
+});
+
 describe('M14 broken-run retention', () => {
   it('broken action retains every annotation', async () => {
     const action = await captureSourceAction({ INPUT_PATHS: M9_BROKEN_FIXTURE });
@@ -606,6 +650,22 @@ describe('M14 broken-run retention', () => {
     for (const name of Object.values(SUMMARY_OUTPUT_NAMES)) {
       expect(outputOccurrences(text, name)).toBe(1);
     }
+  });
+
+  it('broken result publishes every documented output', async () => {
+    const root = makeTempRoot();
+    const outputPath = createOutputPath(root);
+    const action = await captureSourceAction({
+      INPUT_PATHS: M9_BROKEN_FIXTURE,
+      GITHUB_OUTPUT: outputPath,
+    });
+    const text = readFileSync(outputPath, 'utf8');
+
+    expect(action.exitCode).toBe(1);
+    for (const name of Object.values(SUMMARY_OUTPUT_NAMES)) {
+      expect(outputOccurrences(text, name)).toBe(1);
+    }
+    expect(parseSummaryOutputs(text)).toEqual(BROKEN_COUNTS);
   });
 
   it('broken action annotation order equals result order', async () => {
@@ -842,6 +902,22 @@ describe('M14 clean-run behavior', () => {
       broken: 0,
       externalSkipped: CLEAN_COUNTS.externalSkipped,
     });
+  });
+
+  it('clean result publishes every documented output', async () => {
+    const root = makeTempRoot();
+    const outputPath = createOutputPath(root);
+    const action = await captureSourceAction({
+      INPUT_PATHS: M9_CLEAN_FIXTURE,
+      GITHUB_OUTPUT: outputPath,
+    });
+    const text = readFileSync(outputPath, 'utf8');
+
+    expect(action.exitCode).toBe(0);
+    for (const name of Object.values(SUMMARY_OUTPUT_NAMES)) {
+      expect(outputOccurrences(text, name)).toBe(1);
+    }
+    expect(parseSummaryOutputs(text)).toEqual(CLEAN_COUNTS);
   });
 
   it('clean action CLI output remains unchanged', async () => {
@@ -1162,7 +1238,7 @@ describe('M14 failure interaction', () => {
     const env: NodeJS.ProcessEnv = { ...process.env, INPUT_PATHS: '.' };
     delete env.GITHUB_OUTPUT;
 
-    const result = await runNode(join(REPO_ROOT, 'dist', 'action.js'), [], {
+    const result = await runNode(ACTION_ARTIFACT_PATH, [], {
       cwd: M9_BROKEN_FIXTURE,
       env,
       requires: [join(REPO_ROOT, 'test', 'action-write-failure.cjs')],
@@ -1181,7 +1257,7 @@ describe('M14 failure interaction', () => {
     const env: NodeJS.ProcessEnv = { ...process.env, INPUT_PATHS: '.' };
     delete env.GITHUB_OUTPUT;
 
-    const result = await runNode(join(REPO_ROOT, 'dist', 'action.js'), [], {
+    const result = await runNode(ACTION_ARTIFACT_PATH, [], {
       cwd: M9_BROKEN_FIXTURE,
       env,
       requires: [join(REPO_ROOT, 'test', 'action-write-failure.cjs')],
@@ -1354,12 +1430,84 @@ describe('M14 direct CLI isolation', () => {
     expect(readFileSync(outputPath, 'utf8')).toBe('keep=sentinel\n');
   });
 
-  it('direct JSON CLI emits no workflow command', async () => {
-    const result = await runCli(['--json', '.'], { cwd: M9_BROKEN_FIXTURE });
+  it('direct broken JSON CLI emits no workflow command', async () => {
+    const root = makeTempRoot();
+    const outputPath = createOutputPath(root, 'keep=sentinel\n');
+    const result = await runCli(['--json', '.'], {
+      cwd: M9_BROKEN_FIXTURE,
+      env: { ...process.env, GITHUB_OUTPUT: outputPath },
+    });
+    const report = JSON.parse(result.stdout) as {
+      version: number;
+      ok: boolean;
+      exitCode: number;
+      summary: SummaryOutputValues;
+      diagnostics: unknown[];
+    };
 
     expect(result.status).toBe(1);
+    expect(report.version).toBe(1);
+    expect(report.ok).toBe(false);
+    expect(report.exitCode).toBe(1);
+    expect(report.summary).toEqual(BROKEN_COUNTS);
+    expect(report.diagnostics).toHaveLength(BROKEN_COUNTS.broken);
     expect(result.stdout).not.toContain('::error');
     expect(result.stderr).toBe('');
+    expect(readFileSync(outputPath, 'utf8')).toBe('keep=sentinel\n');
+  });
+
+  it('direct clean JSON CLI exits 0 without annotations or action outputs', async () => {
+    const root = makeTempRoot();
+    const outputPath = createOutputPath(root, 'keep=sentinel\n');
+    const result = await runCli(['--json', '.'], {
+      cwd: M9_CLEAN_FIXTURE,
+      env: { ...process.env, GITHUB_OUTPUT: outputPath },
+    });
+    const report = JSON.parse(result.stdout) as {
+      version: number;
+      ok: boolean;
+      exitCode: number;
+      summary: SummaryOutputValues;
+      diagnostics: unknown[];
+    };
+
+    expect(result.status).toBe(0);
+    expect(report.version).toBe(1);
+    expect(report.ok).toBe(true);
+    expect(report.exitCode).toBe(0);
+    expect(report.summary).toEqual(CLEAN_COUNTS);
+    expect(report.diagnostics).toEqual([]);
+    expect(result.stdout).not.toContain('::error');
+    expect(result.stderr).toBe('');
+    expect(readFileSync(outputPath, 'utf8')).toBe('keep=sentinel\n');
+  });
+
+  it('direct usage-error JSON CLI exits 2 without annotations or action outputs', async () => {
+    const root = makeTempRoot();
+    const outputPath = createOutputPath(root, 'keep=sentinel\n');
+    const result = await runCli(['--json'], {
+      cwd: M9_CLEAN_FIXTURE,
+      env: { ...process.env, GITHUB_OUTPUT: outputPath },
+    });
+    const report = JSON.parse(result.stdout) as {
+      version: number;
+      ok: boolean;
+      exitCode: number;
+      error?: { kind: string; message: string };
+      summary: SummaryOutputValues;
+      diagnostics: unknown[];
+    };
+
+    expect(result.status).toBe(2);
+    expect(report.version).toBe(1);
+    expect(report.ok).toBe(false);
+    expect(report.exitCode).toBe(2);
+    expect(report.error).toEqual({ kind: 'usage', message: 'no input paths' });
+    expect(report.summary).toEqual({ filesChecked: 0, broken: 0, externalSkipped: 0 });
+    expect(report.diagnostics).toEqual([]);
+    expect(result.stdout).not.toContain('::error');
+    expect(result.stderr).toBe('');
+    expect(readFileSync(outputPath, 'utf8')).toBe('keep=sentinel\n');
   });
 
   it('direct CLI never writes GITHUB_OUTPUT', async () => {
@@ -1412,6 +1560,57 @@ describe('M14 direct CLI isolation', () => {
     expect(report.exitCode).toBe(1);
     expect(report.summary).toEqual(BROKEN_COUNTS);
     expect(report.diagnostics).toHaveLength(BROKEN_COUNTS.broken);
+  });
+
+  it('CLI human-readable surface remains unchanged', async () => {
+    const cleanAction = await captureSourceAction({ INPUT_PATHS: M9_CLEAN_FIXTURE });
+    const brokenAction = await captureSourceAction({ INPUT_PATHS: M9_BROKEN_FIXTURE });
+    const usageAction = await captureSourceAction({});
+    const [cleanCli, brokenCli, usageCli] = await Promise.all([
+      captureRun([M9_CLEAN_FIXTURE]),
+      captureRun([M9_BROKEN_FIXTURE]),
+      captureRun([]),
+    ]);
+
+    expect(cleanAction.exitCode).toBe(0);
+    expect(cleanAction.stdout).toBe(cleanCli.stdout);
+    expect(cleanAction.stderr).toBe(cleanCli.stderr);
+    expect(brokenAction.exitCode).toBe(1);
+    expect(actionCliText(brokenAction)).toBe(brokenCli.stdout);
+    expect(brokenAction.stderr).toBe(brokenCli.stderr);
+    expect(usageAction.exitCode).toBe(2);
+    expect(usageAction.stdout).toBe(usageCli.stdout);
+    expect(usageAction.stderr).toBe(usageCli.stderr);
+    expect(actionCliText(brokenAction)).not.toContain('::error');
+  });
+
+  it('CLI JSON surface remains unchanged', async () => {
+    const clean = await runCli(['--json', '.'], { cwd: M9_CLEAN_FIXTURE });
+    const broken = await runCli(['--json', '.'], { cwd: M9_BROKEN_FIXTURE });
+    const usage = await runCli(['--json'], { cwd: M9_CLEAN_FIXTURE });
+    const cleanReport = JSON.parse(clean.stdout) as Record<string, unknown>;
+    const brokenReport = JSON.parse(broken.stdout) as Record<string, unknown>;
+    const usageReport = JSON.parse(usage.stdout) as Record<string, unknown>;
+    const baseFields = [
+      'diagnostics',
+      'exitCode',
+      'external',
+      'ok',
+      'summary',
+      'version',
+    ];
+
+    expect(clean.status).toBe(0);
+    expect(broken.status).toBe(1);
+    expect(usage.status).toBe(2);
+    expect(Object.keys(cleanReport).sort()).toEqual(baseFields);
+    expect(Object.keys(brokenReport).sort()).toEqual(baseFields);
+    expect(Object.keys(usageReport).sort()).toEqual([...baseFields, 'error'].sort());
+    expect(cleanReport.summary).toEqual(CLEAN_COUNTS);
+    expect(brokenReport.summary).toEqual(BROKEN_COUNTS);
+    expect(clean.stdout).not.toContain('::error');
+    expect(broken.stdout).not.toContain('::error');
+    expect(usage.stdout).not.toContain('::error');
   });
 });
 
@@ -1714,6 +1913,28 @@ describe('M14 committed artifact', () => {
     expect(firstBytes.equals(readFileSync(ACTION_ARTIFACT_PATH))).toBe(true);
   });
 
+  it('action reproducibility check leaves no diff', async () => {
+    const statusBefore = execFileSync(
+      'git',
+      ['status', '--porcelain', '--', 'action-dist'],
+      { cwd: REPO_ROOT, encoding: 'utf8' },
+    );
+    const artifactBefore = readFileSync(ACTION_ARTIFACT_PATH);
+
+    const result = await runActionBuild(['--check']);
+
+    const statusAfter = execFileSync(
+      'git',
+      ['status', '--porcelain', '--', 'action-dist'],
+      { cwd: REPO_ROOT, encoding: 'utf8' },
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('action entrypoint is reproducible');
+    expect(statusAfter).toBe(statusBefore);
+    expect(statusAfter).toBe('');
+    expect(readFileSync(ACTION_ARTIFACT_PATH).equals(artifactBefore)).toBe(true);
+  });
+
   it('stale action artifact is rejected', async () => {
     const root = makeTempRoot();
     const stale = join(root, 'index.cjs');
@@ -1797,7 +2018,7 @@ describe('M14 scope and compatibility', () => {
     expect(lockfile.packages?.['']?.dependencies ?? {}).toEqual({});
 
     const listed = JSON.parse(
-      execFileSync('npm', ['ls', '--omit=dev', '--json'], {
+      execFileSync(NPM_COMMAND, ['ls', '--omit=dev', '--json'], {
         cwd: REPO_ROOT,
         encoding: 'utf8',
       }),
@@ -1842,6 +2063,7 @@ describe('M14 scope and compatibility', () => {
       };
       const permitted = new Set([
         'test/m14-exit-usage-interaction.test.ts',
+        'docs/m14-plan.md',
         'action-dist/index.cjs',
         'README.md',
       ]);

@@ -34,6 +34,8 @@ interface ProcessOptions {
   cwd: string;
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
+  /** Additional CommonJS preload modules, loaded after the fetch guard. */
+  requires?: readonly string[];
 }
 
 /**
@@ -48,10 +50,11 @@ export async function runNode(
 ): Promise<ProcessResult> {
   const env: NodeJS.ProcessEnv = options.env ?? { ...process.env };
   const timeoutMs = options.timeoutMs ?? 30_000;
+  const preloads = [ACTION_FETCH_GUARD_PATH, ...(options.requires ?? [])];
 
   const child = spawn(
     process.execPath,
-    ['--require', ACTION_FETCH_GUARD_PATH, scriptPath, ...args],
+    [...preloads.flatMap((preload) => ['--require', preload]), scriptPath, ...args],
     { cwd: options.cwd, env, stdio: ['ignore', 'pipe', 'pipe'] },
   );
 

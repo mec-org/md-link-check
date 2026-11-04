@@ -16,10 +16,11 @@
  * line terminator, and the bounds apply to the escaped text: the source finding,
  * the CLI diagnostics and the JSON values stay unescaped and unchanged.
  *
- * M10 defines and tests this formatter only. It is deliberately not imported by
- * the CLI or the action wrapper yet; action emission belongs to a later
- * milestone. It is an internal seam for the action, not a supported library
- * API, and callers must treat findings as read-only.
+ * M12 wires this formatter into the action wrapper (`action-runner.ts`), which
+ * emits one command per finding after the CLI has written its complete output.
+ * The CLI and the action entrypoint's direct CLI path never import this module;
+ * it is an internal seam for the action's CI-facing surface, not a supported
+ * library API, and callers must treat findings as read-only.
  */
 import type { BrokenLinkResult } from './run.js';
 

@@ -1296,22 +1296,25 @@ describe('M11 non-wiring and scope', () => {
     expect(lockfile.packages?.['']?.dependencies ?? {}).toEqual({});
   });
 
-  it('formatter remains unwired from runAction', async () => {
+  it('formatter is wired only into runAction', async () => {
     const action = await runAction({
       cwd: M11_SPECIAL_VALUES_FIXTURE,
       inputs: { INPUT_PATHS: '.' },
     });
 
     expect(action.status).toBe(1);
-    expect(action.stdout.split('\n').some((line) => line.startsWith('::'))).toBe(false);
-    expect(readActionArtifactText()).not.toContain('formatAnnotation');
-    for (const file of ['action-runner.ts', 'action.ts']) {
+    expect(action.stdout.split('\n').some((line) => line.startsWith('::'))).toBe(true);
+    expect(readActionArtifactText()).toContain('formatAnnotation');
+    expect(
+      readFileSync(join(REPO_ROOT, 'src', 'action-runner.ts'), 'utf8'),
+    ).toMatch(/formatAnnotation|annotation\.js/);
+    for (const file of ['run.ts', 'report.ts', 'cli.ts']) {
       const source = readFileSync(join(REPO_ROOT, 'src', file), 'utf8');
       expect(source).not.toMatch(/formatAnnotation|annotation\.js/);
     }
   });
 
-  it('normal action execution emits no annotation in M11', async () => {
+  it('normal action execution annotates every special-valued finding in M12', async () => {
     const action = await runAction({
       cwd: M11_SPECIAL_VALUES_FIXTURE,
       inputs: { INPUT_PATHS: '.' },
@@ -1319,7 +1322,19 @@ describe('M11 non-wiring and scope', () => {
 
     expect(action.status).toBe(1);
     expect(action.stderr).toBe('');
-    expect(action.stdout).toBe(M11_EXPECTED_TEXT);
+    expect(action.stdout.startsWith(M11_EXPECTED_TEXT)).toBe(true);
+
+    const annotations = action.stdout
+      .slice(M11_EXPECTED_TEXT.length)
+      .split('\n')
+      .filter((line) => line !== '');
+    expect(annotations).toEqual(M11_EXPECTED_ANNOTATIONS);
+    for (const [index, finding] of M11_SPECIAL_VALUES_FINDINGS.entries()) {
+      const parsed = parseAnnotation(annotations[index] ?? '');
+      expect(parsed.file).toBe(finding.file);
+      expect(parsed.line).toBe(finding.line);
+      expect(parsed.message).toBe(`${finding.target}${SEPARATOR}${finding.reason}`);
+    }
   });
 
   it('normal CLI execution emits no annotation in M11', async () => {

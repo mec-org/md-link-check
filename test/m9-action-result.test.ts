@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildCommandLine, runAction } from '../src/action-runner.js';
+import { formatAnnotations } from '../src/annotation.js';
 import type { CliIo, RunResult } from '../src/run.js';
 import { makeTempRoot, writeFiles } from './helpers.js';
 import {
@@ -155,14 +156,19 @@ describe('M9 action wrapper structured results', () => {
     expect(action.diagnostics).toEqual([]);
   });
 
-  it('action wrapper emits no annotations in M9', async () => {
+  it('action wrapper emits one annotation per M9 structured finding', async () => {
     const action = await captureAction({ INPUT_PATHS: M9_BROKEN_FIXTURE });
-    const output = `${action.stdout}${action.stderr}`;
+    const expected = formatAnnotations(action.diagnostics)
+      .map((annotation) => `${annotation}\n`)
+      .join('');
 
-    expect(output).not.toMatch(/^::[a-z-]+/m);
-    expect(output).not.toContain('::error');
-    expect(output).not.toContain('::warning');
-    expect(output).not.toContain('::notice');
+    expect(action.exitCode).toBe(1);
+    expect(action.diagnostics).not.toHaveLength(0);
+    expect(action.stdout.endsWith(expected)).toBe(true);
+    expect(action.stdout.slice(0, action.stdout.length - expected.length)).toContain(
+      'Checked 2 files: 9 broken targets',
+    );
+    expect(action.stderr).toBe('');
   });
 
   it('action wrapper emits no action outputs in M9', async () => {

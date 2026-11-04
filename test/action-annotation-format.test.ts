@@ -518,7 +518,7 @@ describe('annotation formatter separation from execution', () => {
     expect(json.stdout).not.toMatch(/^::[a-z-]+/m);
   });
 
-  it('action output remains free of workflow-command annotations in M10', async () => {
+  it('action output annotates after unchanged CLI output in M12', async () => {
     const action = await runAction({
       cwd: M9_BROKEN_FIXTURE,
       inputs: { INPUT_PATHS: '.' },
@@ -527,20 +527,25 @@ describe('annotation formatter separation from execution', () => {
 
     expect(action.status).toBe(1);
     expect(output).toContain('README.md:3: docs/missing.md — target does not exist');
-    expect(output).not.toContain('::error');
-    expect(output).not.toMatch(/^::[a-z-]+/m);
+    expect(output).toContain(
+      '::error file=README.md,line=3::docs/missing.md — target does not exist',
+    );
+    expect(output.indexOf('::error')).toBeGreaterThan(
+      output.indexOf('Checked 2 files: 9 broken targets'),
+    );
   });
 
-  it('formatter is not wired into runAction', async () => {
+  it('formatter is wired into runAction', async () => {
     const action = await runAction({
       cwd: M9_BROKEN_FIXTURE,
       inputs: { INPUT_PATHS: '.' },
     });
 
     expect(action.status).toBe(1);
-    expect(`${action.stdout}${action.stderr}`).not.toContain('::error');
-    expect(readActionArtifactText()).not.toContain('formatAnnotation');
-    for (const file of ['action-runner.ts', 'action.ts']) {
+    expect(action.stdout).toContain('::error ');
+    expect(readActionArtifactText()).toContain('formatAnnotation');
+    expect(readSource('action-runner.ts')).toMatch(/formatAnnotation|annotation\.js/);
+    for (const file of ['run.ts', 'report.ts', 'cli.ts']) {
       const source = readSource(file);
       expect(source).not.toMatch(/formatAnnotation|annotation\.js/);
     }

@@ -10,10 +10,18 @@
  * changes the working directory, so caller-relative paths keep resolving from
  * the caller's workspace while the action itself is loaded from its own
  * checkout.
+ *
+ * This is the narrowest action-only boundary. After the CLI has completed its
+ * checking and written its complete, unchanged diagnostics and summary, the
+ * wrapper renders one GitHub workflow-command annotation per structured
+ * broken-link finding and writes those lines to standard output. Direct CLI
+ * execution never imports this module or the annotation formatter.
  */
+import { formatAnnotations } from './annotation.js';
 import {
   formatUsageErrorText,
   run,
+  type BrokenLinkResult,
   type CliIo,
   type RunResult,
 } from './run.js';
@@ -60,9 +68,16 @@ export function createProcessIo(): CliIo {
 }
 
 /**
- * Runs the CLI for one action invocation and returns its exit code together
- * with the ordered, immutable broken-link findings. The findings come directly
- * from the CLI's in-process result; the wrapper never reads its own output.
+ * Runs the CLI for one action invocation, emits one workflow-command annotation
+ * per structured broken-link finding, and returns the CLI's exit code together
+ * with the ordered, immutable findings. The findings come directly from the
+ * CLI's in-process result; the wrapper never reads, parses or re-renders its
+ * own output.
+ *
+ * The CLI writes its complete diagnostics and summary before this function
+ * returns from `run(...)`, so every annotation line lands after the unchanged
+ * CLI output. An empty finding list writes nothing, and the exit code is
+ * returned exactly as the CLI produced it.
  *
  * An invalid input is reported through the same text-mode usage diagnostic and
  * exit code `2` as a CLI usage error, before any checking or network access
@@ -83,7 +98,25 @@ export async function runAction(
     throw error;
   }
 
-  return run(buildCommandLine(inputs), io);
+  const result = await run(buildCommandLine(inputs), io);
+  emitAnnotations(result.diagnostics, io);
+  return result;
+}
+
+/**
+ * Emits one annotation line per structured finding, in the finding order. The
+ * existing formatter owns escaping, truncation and one-command-per-finding
+ * rendering; this helper only controls the physical line boundary, writing a
+ * single trailing newline after each command. Emissions are never sorted,
+ * deduplicated or counted, and an empty list writes no bytes.
+ */
+export function emitAnnotations(
+  findings: readonly BrokenLinkResult[],
+  io: CliIo,
+): void {
+  for (const annotation of formatAnnotations(findings)) {
+    io.writeOut(`${annotation}\n`);
+  }
 }
 
 function parsePaths(raw: string | undefined): string[] {

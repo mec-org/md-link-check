@@ -28,6 +28,96 @@ __export(action_exports, {
 });
 module.exports = __toCommonJS(action_exports);
 
+// src/annotation.ts
+var ANNOTATION_LIMITS = Object.freeze({
+  /** Maximum characters in the rendered `file` property. */
+  file: 4096,
+  /** Maximum characters in the rendered target part of the message. */
+  target: 8192,
+  /** Maximum characters in the rendered reason part of the message. */
+  reason: 8192,
+  /** Maximum characters in the rendered annotation message. */
+  message: 16384
+});
+var TRUNCATION_MARKER = "…";
+var DATA_CHANNEL_ESCAPES = /* @__PURE__ */ new Map([
+  ["%", "%25"],
+  ["\r", "%0D"],
+  ["\n", "%0A"]
+]);
+var PROPERTY_CHANNEL_ESCAPES = new Map([
+  ...DATA_CHANNEL_ESCAPES,
+  [":", "%3A"],
+  [",", "%2C"]
+]);
+function formatAnnotation(finding) {
+  const file = renderBounded(
+    finding.file,
+    escapePropertyCharacter,
+    ANNOTATION_LIMITS.file
+  );
+  const target = renderBounded(
+    finding.target,
+    escapeDataCharacter,
+    ANNOTATION_LIMITS.target
+  );
+  const separator = " — ";
+  const reasonBudget = Math.max(
+    1,
+    ANNOTATION_LIMITS.message - target.points - separator.length
+  );
+  const reason = renderBounded(
+    finding.reason,
+    escapeDataCharacter,
+    Math.min(ANNOTATION_LIMITS.reason, reasonBudget)
+  );
+  return `::error file=${file.text},line=${formatSourceLine(finding.line)}::${target.text}${separator}${reason.text}`;
+}
+function formatAnnotations(findings) {
+  return findings.map((finding) => formatAnnotation(finding));
+}
+function renderBounded(value, escapeCharacter, limit) {
+  const atoms = [];
+  let points = 0;
+  let complete = true;
+  for (const character of value) {
+    const atom = escapeCharacter(character);
+    const atomPoints = atom === character ? 1 : atom.length;
+    if (points + atomPoints > limit) {
+      complete = false;
+      break;
+    }
+    atoms.push({ text: atom, points: atomPoints });
+    points += atomPoints;
+  }
+  if (complete) {
+    return { text: atoms.map((atom) => atom.text).join(""), points };
+  }
+  while (points > limit - TRUNCATION_MARKER.length) {
+    const removed = atoms.pop();
+    if (removed === void 0) {
+      break;
+    }
+    points -= removed.points;
+  }
+  return {
+    text: `${atoms.map((atom) => atom.text).join("")}${TRUNCATION_MARKER}`,
+    points: points + TRUNCATION_MARKER.length
+  };
+}
+function formatSourceLine(line) {
+  if (!Number.isInteger(line) || line < 1) {
+    throw new RangeError(`invalid broken-link line: ${String(line)}`);
+  }
+  return String(line);
+}
+function escapeDataCharacter(character) {
+  return DATA_CHANNEL_ESCAPES.get(character) ?? character;
+}
+function escapePropertyCharacter(character) {
+  return PROPERTY_CHANNEL_ESCAPES.get(character) ?? character;
+}
+
 // src/checker.ts
 var import_node_fs2 = require("node:fs");
 var import_node_path2 = require("node:path");
@@ -2461,7 +2551,15 @@ async function runAction(environment, io2) {
     }
     throw error;
   }
-  return run(buildCommandLine(inputs), io2);
+  const result = await run(buildCommandLine(inputs), io2);
+  emitAnnotations(result.diagnostics, io2);
+  return result;
+}
+function emitAnnotations(findings, io2) {
+  for (const annotation of formatAnnotations(findings)) {
+    io2.writeOut(`${annotation}
+`);
+  }
 }
 function parsePaths(raw) {
   if (raw === void 0) {

@@ -13,11 +13,13 @@ import {
 import { formatAnnotations } from '../src/annotation.js';
 import type { CliIo, RunResult } from '../src/run.js';
 import {
+  ACTION_ARTIFACT_PATH,
   REPO_ROOT,
   copyActionRuntime,
   readActionArtifactText,
   readScopeReport,
   runAction as runCommittedAction,
+  runActionBuild,
   runCli,
 } from './action-helpers.js';
 import { makeTempRoot, writeFiles } from './helpers.js';
@@ -1031,6 +1033,61 @@ describe('M13 committed artifact outputs', () => {
     expect(artifact).toContain('GITHUB_OUTPUT');
     expect(artifact).toContain(SUMMARY_OUTPUT_NAMES.filesChecked);
     expect(artifact).toContain(SUMMARY_OUTPUT_NAMES.externalSkipped);
+  });
+});
+
+/**
+ * In-packet artifact and dependency proofs.
+ *
+ * These duplicate the repository-wide checks on purpose: a merge-gate packet
+ * only sees the files a PR changes, so the evidence that the committed
+ * entrypoint is current, that a rebuild is byte reproducible and that the
+ * package keeps zero runtime dependencies must live in an M13 test file too.
+ */
+describe('M13 in-packet artifact verification', () => {
+  it('checked-in action artifact is current', async () => {
+    const result = await runActionBuild(['--check']);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('action entrypoint is reproducible');
+    expect(result.stderr).toBe('');
+  });
+
+  it('action entrypoint rebuild is byte reproducible', async () => {
+    const root = makeTempRoot();
+    const first = join(root, 'first.cjs');
+    const second = join(root, 'second.cjs');
+
+    const firstBuild = await runActionBuild(['--outfile', first]);
+    expect(firstBuild.status, firstBuild.stderr).toBe(0);
+    const secondBuild = await runActionBuild(['--outfile', second]);
+    expect(secondBuild.status, secondBuild.stderr).toBe(0);
+
+    const firstBytes = readFileSync(first);
+    const secondBytes = readFileSync(second);
+    expect(firstBytes.length).toBeGreaterThan(0);
+    expect(firstBytes.equals(secondBytes)).toBe(true);
+    expect(firstBytes.equals(readFileSync(ACTION_ARTIFACT_PATH))).toBe(true);
+  });
+
+  it('package retains zero runtime dependencies', () => {
+    const manifest = JSON.parse(
+      readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'),
+    ) as { dependencies?: Record<string, string> };
+    expect(manifest.dependencies ?? {}).toEqual({});
+
+    const lockfile = JSON.parse(
+      readFileSync(join(REPO_ROOT, 'package-lock.json'), 'utf8'),
+    ) as { packages?: Record<string, { dependencies?: Record<string, string> }> };
+    expect(lockfile.packages?.['']?.dependencies ?? {}).toEqual({});
+
+    const listed = JSON.parse(
+      execFileSync('npm', ['ls', '--omit=dev', '--json'], {
+        cwd: REPO_ROOT,
+        encoding: 'utf8',
+      }),
+    ) as { dependencies?: Record<string, unknown> };
+    expect(listed.dependencies ?? {}).toEqual({});
   });
 });
 

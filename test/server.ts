@@ -17,11 +17,22 @@ export interface FixtureServer {
   readonly url: string;
   /** Requests received so far, in arrival order. */
   readonly requests: readonly FixtureRequest[];
-  /** The number of `/gate` requests currently waiting for `releaseGated()`. */
+  /**
+   * Request targets received so far, as path plus query, in arrival order.
+   * Kept separate from `requests` so existing method/path assertions stay
+   * stable while normalization tests can observe the transmitted query.
+   */
+  readonly requestTargets: readonly string[];
+  /**
+   * The number of gated requests (`/gate` and `/gate-not-found`) currently
+   * waiting for `releaseGated()`.
+   */
   readonly gated: number;
-  /** Resolves once at least `count` `/gate` requests are waiting at the same time. */
+  /**
+   * Resolves once at least `count` gated requests are waiting at the same time.
+   */
   waitForGated(count: number): Promise<void>;
-  /** Answers every `/gate` request that is currently waiting. */
+  /** Answers every gated request that is currently waiting. */
   releaseGated(): void;
   /** True once `close()` finished successfully. */
   readonly closed: boolean;
@@ -34,6 +45,7 @@ export interface FixtureServer {
 /** Starts a fixture with the endpoints documented in test/server.ts. */
 export async function startFixtureServer(): Promise<FixtureServer> {
   const requests: FixtureRequest[] = [];
+  const requestTargets: string[] = [];
   const counters = new Map<string, number>();
   const gateResponses: Array<() => void> = [];
   const gateWaiters: Array<{ count: number; resolve: () => void }> = [];
@@ -53,6 +65,7 @@ export async function startFixtureServer(): Promise<FixtureServer> {
     const requestUrl = new URL(request.url ?? '/', 'http://127.0.0.1');
     const path = requestUrl.pathname;
     requests.push({ method: request.method ?? 'GET', path });
+    requestTargets.push(`${path}${requestUrl.search}`);
 
     const hit = (counters.get(path) ?? 0) + 1;
     counters.set(path, hit);
@@ -79,6 +92,16 @@ export async function startFixtureServer(): Promise<FixtureServer> {
         gateResponses.push(() => {
           response.writeHead(200, { 'content-type': 'text/plain' });
           response.end('ok');
+        });
+        notifyGateWaiters();
+        return;
+      case '/gate-not-found':
+        // A gated terminal failure: the test controls when the permanent 404
+        // is delivered so completion order can differ from source order.
+        gated += 1;
+        gateResponses.push(() => {
+          response.writeHead(404, { 'content-type': 'text/plain' });
+          response.end('not found');
         });
         notifyGateWaiters();
         return;
@@ -159,6 +182,7 @@ export async function startFixtureServer(): Promise<FixtureServer> {
   return {
     url: baseUrl,
     requests,
+    requestTargets,
     get gated() {
       return gated;
     },

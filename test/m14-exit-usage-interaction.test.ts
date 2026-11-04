@@ -2061,11 +2061,28 @@ describe('M14 scope and compatibility', () => {
         changed: string[];
         violations: string[];
       };
+      // M14's packet check runs on later branches too. Later milestones add
+      // their own test files and fixture changes on top of the authorized
+      // base; list them explicitly so M14's own files stay the only M14-era
+      // changes this check accepts. Later packets prove their own files.
+      const laterMilestonePaths = new Set([
+        'test/m15-committed-artifact.test.ts',
+        'test/m15-default-offline.test.ts',
+        'test/m15-direct-cli.test.ts',
+        'test/m15-external-enabled.test.ts',
+        'test/m15-external-failures.test.ts',
+        'test/m15-helpers.ts',
+        'test/m15-metadata-scope.test.ts',
+        'test/m15-mixed-usage.test.ts',
+        'test/m15-occurrence-cache.test.ts',
+        'test/server.ts',
+      ]);
       const permitted = new Set([
         'test/m14-exit-usage-interaction.test.ts',
         'docs/m14-plan.md',
         'action-dist/index.cjs',
         'README.md',
+        ...laterMilestonePaths,
       ]);
 
       expect(report.base).toBe(M14_BASE_SHA);

@@ -2106,6 +2106,8 @@ describe('M14 scope and compatibility', () => {
         'src/summary-markdown.ts',
         'test/summary-markdown.test.ts',
         'docs/m18-summary-markdown.md',
+        'test/summary-diagnostic-list.test.ts',
+        'docs/m19-diagnostic-list-formatter.md',
       ]);
       const permitted = new Set([
         'test/m14-exit-usage-interaction.test.ts',

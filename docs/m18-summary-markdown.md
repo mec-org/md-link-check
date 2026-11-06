@@ -15,9 +15,9 @@ expected to pass every value through it, and M20 writes the summary.
 - `escapeSummaryValue(value: string): string` — escapes one value;
 - `SUMMARY_VALUE_MAX_EXPANSION` — the documented expansion bound (`6`).
 
-The module imports nothing, reads no environment, performs no I/O and adds no
-runtime dependency. It iterates the input by Unicode code point, so surrogate
-pairs and other non-ASCII text are never split or rewritten.
+The module has no runtime imports, reads no environment, performs no I/O and
+adds no runtime dependency. It iterates the input by Unicode code point, so
+surrogate pairs and other non-ASCII text are never split or rewritten.
 
 ## Encoding rules
 

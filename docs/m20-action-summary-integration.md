@@ -2,6 +2,10 @@
 
 Base: `02127a78d1e72639a791d21bebb524c3d65cbc34` (M19 follow-ups, #52).
 
+Follow-up: the charter and tag pins below were added on top of the current
+`main` after M20 (#54) and M21 (#56) merged; the follow-up PR carries only those
+pin changes against that tree.
+
 M20 wires the M19 formatter into the existing GitHub Action. After one normal
 completed check, the action appends exactly one M19-formatted job summary to the
 file the runner names in `GITHUB_STEP_SUMMARY`. The direct CLI, the annotations,
@@ -139,6 +143,33 @@ that adds it, so those two assertions now prove the opposite direction: the new
 summary is appended while every frozen M9/M17 structured-result and surface byte
 stays unchanged. No byte-level, order or error assertion was weakened.
 
+### Charter and tag pins (owner decision, 2026-11-06)
+
+The owner decided "pin, then merge" for PR #54. PR #54 merged before this
+follow-up landed; this change carries the pins on top of the current tree.
+Instead of exempting the two owner-approved v0.4 charter files, both later
+scope guards pin them by content, and the M16 tag check accepts exactly the
+owner's `v0.3.0` tag:
+
+- `test/charter-pins.ts` records the Git blob hashes of the owner-approved
+  charter content from #44 (`2093d17`): `PROJECT.md`
+  `ea3d2ee55f766b0d30956754e4908fa578c6c5c7`, `ROADMAP.md`
+  `b7c34bd3902a0a26551d6fb1bb7266134a5fddeb`.
+- `test/m14-exit-usage-interaction.test.ts` and
+  `test/m16-artifact-scope.test.ts` accept `PROJECT.md`/`ROADMAP.md` only when
+  `git hash-object` of the current bytes equals the pinned hash. Any other
+  content is reported as a changed-path violation, so the pin is strictly
+  stronger than an exemption and needs no git history (it also holds in a
+  shallow CI checkout). A future owner-approved charter PR updates the hashes in
+  the same PR that changes the files.
+- `test/m16-artifact-scope.test.ts` accepts `git tag --list 'v0.3*'` being
+  either empty (shallow CI) or exactly `v0.3.0` resolving to the owner-approved
+  M16 commit `4438906e6e6085c941faf3117c2aaca1824a073d`; any other `v0.3` tag
+  still fails. The README release statements are unchanged; M23 updates them.
+- A dedicated test copies the pinned bytes into a temporary tree (accepted) and
+  writes different `PROJECT.md` content (reported), proving the pin is not a
+  blanket exemption for either charter path.
+
 ## Tests
 
 `test/action-summary-integration.test.ts`:
@@ -198,10 +229,12 @@ Files updated for the integration, listed here rather than only in the PR:
   did for `GITHUB_OUTPUT`), so the suite never appends to a runner's own
   job-summary file while the M20 tests opt in explicitly with temporary paths.
 - `test/m14-exit-usage-interaction.test.ts`: adds only the M20 paths to the
-  later-milestone allowlist, exactly as earlier milestones did. It does not
-  exempt, skip or widen any pre-existing path; the pre-existing full-checkout
-  charter-file failure described under Verification remains outside M20 and is
-  not hidden by this PR.
+  later-milestone allowlist, exactly as earlier milestones did, plus the
+  owner-approved charter pin described under Scope guard. It does not exempt,
+  skip or widen any other path.
+- `test/m16-artifact-scope.test.ts` and `test/charter-pins.ts`: replace the
+  previous charter-file exemption with the exact blob-hash pin, and accept
+  exactly the owner-approved `v0.3.0` tag at the M16 commit (see Scope guard).
 - `test/m17-v03-surface-regression.test.ts` and
   `test/m9-action-result.test.ts`: the superseded "writes no step summary"
   absence assertions now prove the summary is appended while every frozen
@@ -232,37 +265,13 @@ npm run check:action   # bundled action is current and reproducible
 node scripts/check-scope.mjs   # no .github/ or .project/ change
 ```
 
-All M20 tests, the M18/M19 formatter suites, the M17 fixture provenance and
-surface suites, the M16 artifact/scope suites and the M9–M15 action suites pass
-in the repository's standard check environment: GitHub Actions `CI`
-(`.github/workflows/ci.yml`, `pull_request` trigger: `npm run typecheck` and
-`npm test` on a Linux shallow checkout) plus the repository's CodeQL workflow.
-The live check runs and a locally reproduced CI-equivalent run are recorded
-under "CI evidence" below.
-
-The standard environment is a shallow checkout; a full local checkout
-additionally has every base commit and live tag. That difference exposes two
-pre-existing, environment-dependent failures that are outside M20:
-
-- `test/m14-exit-usage-interaction.test.ts` "M14 changes only permitted paths
-  relative to the authorized base" runs only when its authorized base
-  `be1c580` is present, so CI skips it and a full local checkout runs it. It
-  fails because the owner-approved v0.4 charter PR #44 changed `PROJECT.md` and
-  `ROADMAP.md` after M14's base. M20 changes neither file and does not exempt,
-  skip or allowlist either path: those two files still fail the M14 permitted-
-  path check exactly as they did at the authorized base. Repairing that
-  pre-existing guard belongs to a separate, owner-approved change, not to M20.
-- `test/m16-artifact-scope.test.ts` "v0.3 creates no tag release or npm
-  publication" requires that no `v0.3*` tag exists in the local checkout. A
-  full local clone carries the `v0.3.0` tag created for the M17 fixture
-  provenance, while the CI checkout fetches no tags and the test passes there.
-  This failure is identical at the authorized base `02127a7` and is unrelated
-  to M20.
-
-Full local checkout at the reviewed head, with the M14 base commit and live
-tags available (`npm test`): **1317 passed, 2 failed, 1319 total**. The two
-failures are exactly the pre-existing M14 charter-file and M16 local-tag
-assertions above; M20 neither causes nor hides either one.
+The full suite passes with **0 failures** in a full local checkout with history
+and tags (`npm test`: **58 test files passed, 1332 passed, 1332 total**), and
+the same suites pass in the repository-standard CI environment: GitHub Actions
+`CI` (`.github/workflows/ci.yml`, `pull_request` trigger: `npm run typecheck`
+and `npm test` on a Linux shallow checkout) plus the repository's CodeQL
+workflow. The live check runs and a locally reproduced CI-equivalent run are
+recorded under "CI evidence" below.
 
 Other checks: `npm run check:action` reports
 `action entrypoint is reproducible: action-dist/index.cjs`, and
@@ -272,8 +281,8 @@ Other checks: `npm run check:action` reports
 ## CI evidence
 
 Recorded for the reviewed code head
-`ce099e21c6cc1df57e6f7155b3c21f6eaf123d4d`; the final documentation-only commit
-on this branch changes no code, test or bundle byte.
+`4810d534645f7c15d1f14e2f9ed8ec20da90f4cf`; the documentation-only follow-up
+commit on this branch changes no code, test or bundle byte.
 
 **CI-equivalent reproduction** — the repository-standard checkout condition
 reproduced locally. The clone is one commit deep, fetches no tags and has no M14
@@ -283,20 +292,20 @@ base commit, matching `.github/workflows/ci.yml`:
 git clone --depth 1 --no-tags \
   --branch agent/action-summary-integration-ec54ced0cb85 \
   https://github.com/mec-org/md-link-check.git
-# HEAD=ce099e21c6cc1df57e6f7155b3c21f6eaf123d4d
+# HEAD=4810d534645f7c15d1f14e2f9ed8ec20da90f4cf
 # tags=0, base be1c580 unavailable
 npm ci --ignore-scripts
 npm run typecheck   # pass
-npm test            # Test Files 57 passed (57)
-                    # Tests 1316 passed | 3 skipped (1319)
+npm test            # Test Files 58 passed (58)
+                    # Tests 1329 passed | 3 skipped (1332)
 ```
 
-**Live GitHub Actions checks** at `ce099e2` — 4/4 success:
+**Live GitHub Actions checks** at `4810d53` — 4/4 success:
 
-- `test` — [CI run 42179886646 / job 127766794972](https://github.com/mec-org/md-link-check/actions/runs/42179886646/job/127766794972), pass.
-- `Analyze (actions)` — [run 42179880030 / job 127766779823](https://github.com/mec-org/md-link-check/actions/runs/42179880030/job/127766779823), pass.
-- `Analyze (javascript-typescript)` — [run 42179880030 / job 127766780133](https://github.com/mec-org/md-link-check/actions/runs/42179880030/job/127766780133), pass.
-- `CodeQL` — [run 127766932937](https://github.com/mec-org/md-link-check/runs/127766932937), pass.
+- `test` — [CI run 42186114698 / job 127786726386](https://github.com/mec-org/md-link-check/actions/runs/42186114698/job/127786726386), pass.
+- `Analyze (actions)` — [run 42186109595 / job 127786718051](https://github.com/mec-org/md-link-check/actions/runs/42186109595/job/127786718051), pass.
+- `Analyze (javascript-typescript)` — [run 42186109595 / job 127786717946](https://github.com/mec-org/md-link-check/actions/runs/42186109595/job/127786717946), pass.
+- `CodeQL` — [run 127786928516](https://github.com/mec-org/md-link-check/runs/127786928516), pass.
 
 ## Assumptions found false or resolved
 

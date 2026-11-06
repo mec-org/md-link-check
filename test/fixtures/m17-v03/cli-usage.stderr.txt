@@ -1,0 +1,4 @@
+md-link-check: no input paths
+
+Usage: md-link-check [--json] [--external] <path...>
+Run "md-link-check --help" for usage and exit codes.

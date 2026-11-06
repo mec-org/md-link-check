@@ -1,0 +1,156 @@
+{
+  "version": 1,
+  "ok": false,
+  "exitCode": 1,
+  "summary": {
+    "filesChecked": 4,
+    "broken": 16,
+    "externalSkipped": 4
+  },
+  "external": {
+    "enabled": false,
+    "occurrences": 4,
+    "skipped": 4,
+    "distinctChecked": 0,
+    "succeeded": 0,
+    "failed": 0,
+    "brokenOccurrences": 0,
+    "cache": {
+      "enabled": false,
+      "hits": 0,
+      "misses": 0,
+      "stale": 0
+    },
+    "results": []
+  },
+  "diagnostics": [
+    {
+      "file": "README.md",
+      "line": 3,
+      "column": 30,
+      "kind": "link",
+      "target": "docs/missing.md",
+      "reason": "target does not exist"
+    },
+    {
+      "file": "README.md",
+      "line": 4,
+      "column": 33,
+      "kind": "image",
+      "target": "images/missing.png",
+      "reason": "target does not exist"
+    },
+    {
+      "file": "README.md",
+      "line": 5,
+      "column": 41,
+      "kind": "link",
+      "target": "#missing-anchor",
+      "reason": "anchor does not exist"
+    },
+    {
+      "file": "README.md",
+      "line": 6,
+      "column": 45,
+      "kind": "link",
+      "target": "docs/guide.md#deployment",
+      "reason": "anchor does not exist"
+    },
+    {
+      "file": "README.md",
+      "line": 8,
+      "column": 46,
+      "kind": "link",
+      "target": "docs/missing-raw.md",
+      "reason": "target does not exist"
+    },
+    {
+      "file": "README.md",
+      "line": 9,
+      "column": 55,
+      "kind": "image",
+      "target": "images/missing-raw.png",
+      "reason": "target does not exist"
+    },
+    {
+      "file": "README.md",
+      "line": 10,
+      "column": 32,
+      "kind": "link",
+      "target": "docs/missing-ref.md",
+      "reason": "target does not exist"
+    },
+    {
+      "file": "README.md",
+      "line": 18,
+      "column": 66,
+      "kind": "link",
+      "target": "#duplicate-2",
+      "reason": "anchor does not exist"
+    },
+    {
+      "file": "docs/api.md",
+      "line": 7,
+      "column": 36,
+      "kind": "link",
+      "target": "guide.md#installation-1",
+      "reason": "anchor does not exist"
+    },
+    {
+      "file": "docs/api.md",
+      "line": 8,
+      "column": 27,
+      "kind": "link",
+      "target": "#installation-1",
+      "reason": "anchor does not exist"
+    },
+    {
+      "file": "docs/api.md",
+      "line": 10,
+      "column": 1,
+      "kind": "link",
+      "target": "guide.md#not-a-heading",
+      "reason": "anchor does not exist"
+    },
+    {
+      "file": "docs/guide.md",
+      "line": 7,
+      "column": 49,
+      "kind": "link",
+      "target": "../README.md#missing",
+      "reason": "anchor does not exist"
+    },
+    {
+      "file": "docs/guide.md",
+      "line": 8,
+      "column": 19,
+      "kind": "link",
+      "target": "missing-api.md",
+      "reason": "target does not exist"
+    },
+    {
+      "file": "docs/guide.md",
+      "line": 9,
+      "column": 33,
+      "kind": "image",
+      "target": "../images/missing-logo.png",
+      "reason": "target does not exist"
+    },
+    {
+      "file": "docs/plan/notes.md",
+      "line": 5,
+      "column": 1,
+      "kind": "link",
+      "target": "../guide.md#plan-notes",
+      "reason": "anchor does not exist"
+    },
+    {
+      "file": "docs/plan/notes.md",
+      "line": 6,
+      "column": 1,
+      "kind": "link",
+      "target": "../missing-plan.md",
+      "reason": "target does not exist"
+    }
+  ]
+}

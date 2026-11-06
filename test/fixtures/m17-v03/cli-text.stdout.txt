@@ -1,0 +1,17 @@
+README.md:3: docs/missing.md — target does not exist
+README.md:4: images/missing.png — target does not exist
+README.md:5: #missing-anchor — anchor does not exist
+README.md:6: docs/guide.md#deployment — anchor does not exist
+README.md:8: docs/missing-raw.md — target does not exist
+README.md:9: images/missing-raw.png — target does not exist
+README.md:10: docs/missing-ref.md — target does not exist
+README.md:18: #duplicate-2 — anchor does not exist
+docs/api.md:7: guide.md#installation-1 — anchor does not exist
+docs/api.md:8: #installation-1 — anchor does not exist
+docs/api.md:10: guide.md#not-a-heading — anchor does not exist
+docs/guide.md:7: ../README.md#missing — anchor does not exist
+docs/guide.md:8: missing-api.md — target does not exist
+docs/guide.md:9: ../images/missing-logo.png — target does not exist
+docs/plan/notes.md:5: ../guide.md#plan-notes — anchor does not exist
+docs/plan/notes.md:6: ../missing-plan.md — target does not exist
+Checked 4 files: 16 broken targets, 4 external links skipped.

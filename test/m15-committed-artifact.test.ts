@@ -343,6 +343,24 @@ describe('M15 committed artifact freshness', () => {
     expect(result.stderr).toBe('');
   });
 
+  it('m17 committed action artifact matches a fresh build from current source', async () => {
+    const root = makeTempRoot();
+    const rebuilt = join(root, 'index.cjs');
+
+    const build = await runActionBuild(['--outfile', rebuilt]);
+    expect(build.status, build.stderr).toBe(0);
+    expect(rebuilt).not.toBe(ACTION_ARTIFACT_PATH);
+    expect(readFileSync(rebuilt).equals(readFileSync(ACTION_ARTIFACT_PATH))).toBe(
+      true,
+    );
+
+    const check = await runActionBuild(['--check']);
+    expect(check.status, check.stderr).toBe(0);
+    expect(check.stdout).toContain(
+      'action entrypoint is reproducible: action-dist/index.cjs',
+    );
+  });
+
   it('action entrypoint rebuild is byte reproducible', async () => {
     const root = makeTempRoot();
     const first = join(root, 'first.cjs');

@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "surface": "v0.3.0",
+  "source": {
+    "tag": "v0.3.0",
+    "tagObject": "391e0961b6b024d2458d17932927bf72bc173db3",
+    "commit": "4438906e6e6085c941faf3117c2aaca1824a073d",
+    "commitSubject": "M16: v0.3 hardening, documentation and real-docs run (#43)",
+    "m17Base": "2093d1716358f9784ae2c40c2d6c97171c91d3fe",
+    "actionBundleSha256": "e6e5bf7779cf4d291f1dcca994afbe1c0f754f2b24da63ef9aacb9c8ad5ca237",
+    "note": "The tag commit and the M17 base are identical for src/, action-dist/index.cjs and action.yml; the only commit between them is the owner-approved v0.4 charter."
+  },
+  "capture": {
+    "fixture": "test/fixtures/m16-multifile",
+    "script": "test/m17-capture-fixtures.mjs",
+    "command": "git worktree add <v0.3.0-checkout> v0.3.0 && (cd <v0.3.0-checkout> && npm ci --ignore-scripts && npm run build) && node test/m17-capture-fixtures.mjs --source <v0.3.0-checkout>",
+    "proofCommand": "git diff v0.3.0 2093d1716358f9784ae2c40c2d6c97171c91d3fe -- src action-dist/index.cjs action.yml"
+  },
+  "files": {
+    "action-annotations.txt": {
+      "bytes": 1271,
+      "sha256": "1589b2f25437e23cedb14c6bc266d4474af321ef21963e5288dac810d2436de6"
+    },
+    "action-input-error.stderr.txt": {
+      "bytes": 182,
+      "sha256": "c6ecf4ef0073263d7f58b83a04c3168c5fd770984029933995eb738b924c4a51"
+    },
+    "action-outputs.txt": {
+      "bytes": 45,
+      "sha256": "e253fa361562749ce38a3e306a9676598ec475c431e423ed7e69cb62821c4502"
+    },
+    "cli-json.stdout.txt": {
+      "bytes": 3338,
+      "sha256": "c3581e2f633d82d92d2cfd8d406c363b3159326c54a9c667898ad61f0727baa9"
+    },
+    "cli-text.stdout.txt": {
+      "bytes": 1045,
+      "sha256": "cc78237e97c300212a157a506cbba5e41339e6fd886dc6a7293d7b2c37a58e0d"
+    },
+    "cli-usage.stderr.txt": {
+      "bytes": 137,
+      "sha256": "63d75eb3d196ccfd35624eb6b8447cb78fdee8304eff2dceb31cfca10f2fddb9"
+    },
+    "edge-annotations.txt": {
+      "bytes": 20888,
+      "sha256": "2c9f320c8802e214b06f96b901717b2b8a4714e332b73e181f3d990bc86e46fe"
+    },
+    "special-annotations.txt": {
+      "bytes": 739,
+      "sha256": "bdc6a596885a31e468d6326dd6f77e54a2f0316902ed161ec62cc9a7697ee8e6"
+    }
+  }
+}

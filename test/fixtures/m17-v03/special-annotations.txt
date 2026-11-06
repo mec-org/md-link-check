@@ -1,0 +1,10 @@
+::error file=100%25.md,line=3::missing-target.md — target does not exist
+::error file=README.md,line=3::docs/100%25.md — target does not exist
+::error file=README.md,line=4::docs/a,b.md — target does not exist
+::error file=README.md,line=5::docs/a:b.md — target does not exist
+::error file=README.md,line=6::docs/::error.md — target does not exist
+::error file=README.md,line=7::docs/::warning.md — target does not exist
+::error file=README.md,line=8::docs/日本語.md — target does not exist
+::error file=README.md,line=9::docs/literal%250A.md — target does not exist
+::error file=README.md,line=10::docs/a=b"c.md — target does not exist
+::error file=comma%2Cfile.md,line=3::missing-target.md — target does not exist

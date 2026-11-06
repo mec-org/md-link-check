@@ -17,6 +17,7 @@ import {
   copyActionRuntime,
   runActionBuild,
 } from './action-helpers.js';
+import { isPinnedCharterFile } from './charter-pins.js';
 import {
   annotationLineCount,
   parseSummaryOutputs,
@@ -24,7 +25,7 @@ import {
   splitActionOutput,
 } from './m15-helpers.js';
 import { parseAnnotation } from './m11-helpers.js';
-import { makeTempRoot } from './helpers.js';
+import { makeTempRoot, writeFiles } from './helpers.js';
 import { startFixtureServer } from './server.js';
 import {
   M16_BASE_SHA,
@@ -101,11 +102,28 @@ function isAllowedPath(path: string): boolean {
 }
 
 /**
- * The charter files change only in an owner-approved charter PR (the v0.4 charter, #44), never in a milestone: the v0.4
- * definition of done (item 9) forbids it, and the factory's merge gate treats both as tier 3, which only the owner merges.
- * Every other protected path below stays frozen against the base.
+ * Paths changed against the base that no allow rule accepts. The two
+ * owner-approved v0.4 charter files are allowed only when their bytes still
+ * match the pinned blob hashes in `test/charter-pins.ts`; a change to either
+ * file is reported like any other out-of-scope change.
  */
-const CHARTER_FILES: readonly string[] = ['PROJECT.md', 'ROADMAP.md'];
+function changedPathViolations(
+  changed: readonly string[],
+  root: string = REPO_ROOT,
+): string[] {
+  return changed.filter(
+    (path) => !isAllowedPath(path) && !isPinnedCharterFile(path, root),
+  );
+}
+
+/**
+ * The owner-approved v0.3 tag and its M16 commit (owner decision, 2026-11-06).
+ * A shallow CI checkout carries no tags; a full checkout may carry exactly this
+ * tag. Any other `v0.3*` tag remains a release this milestone must not create.
+ */
+const OWNER_APPROVED_V03_TAG = 'v0.3.0';
+const OWNER_APPROVED_V03_TAG_COMMIT =
+  '4438906e6e6085c941faf3117c2aaca1824a073d';
 
 describe('M16 v0.3 committed artifact', () => {
   it('v0.3 checked-in artifact handles the multi-file fixture', async () => {
@@ -247,9 +265,27 @@ describe('M16 v0.3 committed artifact', () => {
 describe('M16 v0.3 changed-path scope', () => {
   it('v0.3 changes only permitted paths', () => {
     const changed = changedPathsSinceBase();
-    const violations = changed.filter((path) => !isAllowedPath(path) && !CHARTER_FILES.includes(path));
 
-    expect(violations).toEqual([]);
+    expect(changedPathViolations(changed)).toEqual([]);
+  });
+
+  it('pinned charter files pass only with the owner-approved content', () => {
+    const differing = makeTempRoot();
+    writeFiles(differing, { 'PROJECT.md': '# Modified charter\n' });
+    const pinned = makeTempRoot();
+    writeFiles(pinned, {
+      'PROJECT.md': readFileSync(join(REPO_ROOT, 'PROJECT.md'), 'utf8'),
+      'ROADMAP.md': readFileSync(join(REPO_ROOT, 'ROADMAP.md'), 'utf8'),
+    });
+
+    // The exact owner-approved bytes are accepted, so the pin is not a blanket
+    // exemption: the same paths with different content are reported.
+    expect(changedPathViolations(['PROJECT.md', 'ROADMAP.md'], pinned)).toEqual([]);
+    expect(isPinnedCharterFile('PROJECT.md', differing)).toBe(false);
+    expect(changedPathViolations(['PROJECT.md'], differing)).toEqual(['PROJECT.md']);
+
+    // The pin never widens any path other than the two charter files.
+    expect(isPinnedCharterFile('README.md', pinned)).toBe(false);
   });
 
   it('v0.3 changes no path under github metadata', () => {
@@ -297,11 +333,17 @@ describe('M16 v0.3 changed-path scope', () => {
   });
 
   it('v0.3 creates no tag release or npm publication', () => {
-    // A shallow CI checkout may carry no local tags; the absence of a v0.3
-    // tag is therefore checked without fetching and without depending on the
-    // presence of the separate v0.2.0 tag. The acceptance report records the
-    // full observed tag list from a full local checkout.
-    expect(git(['tag', '--list', 'v0.3*']).trim()).toBe('');
+    // A shallow CI checkout may carry no local tags. When this checkout has a
+    // v0.3 tag, it must be exactly the single owner-approved v0.3.0 tag at the
+    // M16 commit; any other v0.3 tag is a release this milestone must not
+    // create.
+    const tags = git(['tag', '--list', 'v0.3*']).trim();
+    if (tags !== '') {
+      expect(tags).toBe(OWNER_APPROVED_V03_TAG);
+      expect(git(['rev-parse', `${OWNER_APPROVED_V03_TAG}^{commit}`]).trim()).toBe(
+        OWNER_APPROVED_V03_TAG_COMMIT,
+      );
+    }
     expect(existsSync(join(REPO_ROOT, '.github', 'workflows', 'release.yml'))).toBe(false);
     const readme = readFileSync(join(REPO_ROOT, 'README.md'), 'utf8');
     expect(readme).toContain('M16 creates no tag or release');

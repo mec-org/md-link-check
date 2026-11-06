@@ -37,6 +37,7 @@ import {
   runNode,
   withDefaultStepSummary,
 } from './action-helpers.js';
+import { isPinnedCharterFile } from './charter-pins.js';
 import { makeTempRoot, writeFiles } from './helpers.js';
 import { parseAnnotation } from './m11-helpers.js';
 import {
@@ -2127,6 +2128,7 @@ describe('M14 scope and compatibility', () => {
         'test/m13-action-outputs.test.ts',
         'test/m21-exit-summary-interaction.test.ts',
         'docs/m21-exit-usage-write-failure.md',
+        'test/charter-pins.ts',
       ]);
       const permitted = new Set([
         'test/m14-exit-usage-interaction.test.ts',
@@ -2141,6 +2143,12 @@ describe('M14 scope and compatibility', () => {
       expect(report.violations).toEqual([]);
       expect(report.changed.length).toBeGreaterThan(0);
       for (const path of report.changed) {
+        if (isPinnedCharterFile(path, REPO_ROOT)) {
+          // The two owner-approved v0.4 charter files pass only while their
+          // bytes match the pinned blob hashes in test/charter-pins.ts; any
+          // other content is an ordinary out-of-scope change.
+          continue;
+        }
         expect(permitted.has(path), `unexpected changed path: ${path}`).toBe(true);
       }
     },

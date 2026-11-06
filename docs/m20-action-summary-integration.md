@@ -176,20 +176,28 @@ stays unchanged. No byte-level, order or error assertion was weakened.
    file.
 9. `writes no summary when no completed check produced a result` — input and
    discovery failures leave both the summary file and the output file empty.
+10. `limits the action summary to fifty diagnostics with the overflow
+    disclosure` — a 52-finding action run lists the first 50 in result order,
+    omits the last two values, and renders the exact `52 total diagnostics; 2
+    not listed.` disclosure with the authentic `Broken: 52` count.
+11. `action-dist/index.cjs is current` — rebuilds the bundle through the
+    repository's established `scripts/build-action.mjs --check` command and
+    requires byte equality with the committed `action-dist/index.cjs`.
 
 `test/cli-summary-isolation.test.ts`:
 
-10. `direct CLI execution does not alter GITHUB_STEP_SUMMARY` — clean, broken
+12. `direct CLI execution does not alter GITHUB_STEP_SUMMARY` — clean, broken
     and `--json` direct CLI runs over a seeded summary file leave it
-    byte-for-byte unchanged and keep normal output and exits.
-11. `direct CLI sources do not reference the action summary writer` — the built
+    byte-for-byte unchanged and keep normal output and exits. The `--json`
+    stdout bytes are also compared with the same run without the variable and
+    asserted structurally.
+13. `direct CLI sources do not reference the action summary writer` — the built
     CLI modules contain no summary or action reference.
 
-Committed-artifact freshness is the existing
-`checked-in action artifact is current` / `action-dist/index.cjs is current`
-coverage in `test/m15-committed-artifact.test.ts` and
-`test/m16-artifact-scope.test.ts`; M20 reuses it instead of adding another build
-mechanism.
+The in-packet `action-dist/index.cjs is current` test reuses the existing
+build script's `--check` mode; `test/m15-committed-artifact.test.ts` and
+`test/m16-artifact-scope.test.ts` keep their established freshness and
+reproducibility coverage, so M20 adds no competing build mechanism.
 
 ## Bundle regeneration
 
@@ -215,13 +223,21 @@ node scripts/check-scope.mjs   # no .github/ or .project/ change
 ```
 
 All M20 tests, the M18/M19 formatter suites, the M17 fixture provenance and
-surface suites, the M16 artifact/scope suites and the M9–M15 action suites pass.
-The full suite has two environment-dependent local failures that also fail at
-the authorized base and pass in the repository's shallow CI checkout: the M16
-test requires that no `v0.3.0` tag exists locally (a full local clone has the
-tag), and the M14 permitted-path test runs only when its authorized base commit
-is available and does not allow the owner-approved v0.4 charter edits to
-`PROJECT.md`/`ROADMAP.md`. Neither is changed by M20.
+surface suites, the M16 artifact/scope suites, the M14 permitted-path re-check
+and the M9–M15 action suites pass. This revision updates the M14 permitted-path
+allowlist for the two owner-approved v0.4 charter files that PR #44 changed
+before M20; M20 itself changes neither `PROJECT.md` nor `ROADMAP.md`, and no
+other path outside the M20 set is allowed.
+
+One environment-dependent local failure remains, and it also fails at the
+authorized base `02127a7`: `test/m16-artifact-scope.test.ts` requires that no
+`v0.3*` tag exists in the local checkout, while a full local clone carries the
+`v0.3.0` tag created for the M17 fixture provenance. The repository's CI
+checkout fetches no tags, so the test passes there. The PR conversation records
+the GitHub Actions results for the reviewed head: the `CI` workflow (typecheck
+and full `npm test`) and the CodeQL workflow completed successfully, and
+`npm run check:action` proves the committed bundle is current in the checkout
+that CI tests.
 
 ## Assumptions found false or resolved
 

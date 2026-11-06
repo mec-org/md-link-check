@@ -55,13 +55,37 @@ describe('M20 direct CLI summary isolation', () => {
     expect(broken.stdout).not.toContain('## Results');
     expect(readFileSync(summaryPath, 'utf8')).toBe(seed);
 
-    // JSON mode never writes it either.
+    // JSON mode never writes it either, and its stdout bytes are identical to
+    // the same run without the summary variable.
     const json = await runCli(['--json', '--', '.'], {
       cwd: fixture,
       env: environment,
     });
+    const jsonWithoutSummary = await runCli(['--json', '--', '.'], {
+      cwd: fixture,
+      env: { XDG_CACHE_HOME: join(root, 'cache-home') },
+    });
+    const report = JSON.parse(json.stdout) as {
+      version: number;
+      ok: boolean;
+      exitCode: number;
+      summary: { filesChecked: number; broken: number; externalSkipped: number };
+      diagnostics: unknown[];
+    };
+
     expect(json.status).toBe(1);
     expect(json.stderr).toBe('');
+    expect(json.stdout).toBe(jsonWithoutSummary.stdout);
+    expect(json.stdout.endsWith('\n')).toBe(true);
+    expect(report.version).toBe(1);
+    expect(report.ok).toBe(false);
+    expect(report.exitCode).toBe(1);
+    expect(report.summary).toEqual({
+      filesChecked: 2,
+      broken: 1,
+      externalSkipped: 0,
+    });
+    expect(report.diagnostics).toHaveLength(1);
     expect(readFileSync(summaryPath, 'utf8')).toBe(seed);
   });
 

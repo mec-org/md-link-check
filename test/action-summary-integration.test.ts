@@ -21,7 +21,7 @@ import { describe, expect, it } from 'vitest';
 import { runAction as runSourceAction, writeStepSummary } from '../src/action-runner.js';
 import { formatRunSummaryMarkdown } from '../src/summary-markdown.js';
 import type { CliIo } from '../src/run.js';
-import { runAction, type ProcessResult } from './action-helpers.js';
+import { runAction, runActionBuild, type ProcessResult } from './action-helpers.js';
 import { makeTempRoot, writeFiles } from './helpers.js';
 
 /** A clean fixture: two files, every target resolvable, no external uses. */
@@ -401,5 +401,63 @@ describe('M20 action summary integration', () => {
     expect(discoveryFailure.stderr).toContain('cannot access input path');
     expect(readFileSync(summaryPath, 'utf8')).toBe('');
     expect(readFileSync(outputPath, 'utf8')).toBe('');
+  });
+
+  it('limits the action summary to fifty diagnostics with the overflow disclosure', async () => {
+    const root = makeTempRoot();
+    const fixture = join(root, 'fixture');
+    const links = Array.from(
+      { length: 52 },
+      (_, index) => `[missing ${index + 1}](missing-${index + 1}.md)`,
+    );
+    writeFiles(fixture, {
+      'README.md': `# Overflow fixture\n\n${links.join('\n')}\n`,
+    });
+    const summaryPath = join(root, 'step-summary.md');
+    writeFileSync(summaryPath, '');
+
+    const { result } = await invokeArtifact(root, fixture, summaryPath);
+    const summary = readFileSync(summaryPath, 'utf8');
+    const diagnostics = summary.slice(summary.indexOf('## Diagnostics'));
+    const listed = diagnostics.split('\n').filter((line) => line.startsWith('- '));
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toContain(
+      'Checked 1 file: 52 broken targets, 0 external links skipped.\n',
+    );
+    expect(result.stdout.match(/^::error /gm)?.length).toBe(52);
+
+    // The M19 limit is 50 in result order; the last two findings are disclosed
+    // by count only. The counts remain the authentic M17 totals.
+    expect(summary).toContain(
+      '- Checked: 1\n- Broken: 52\n- External skipped: 0\n',
+    );
+    expect(listed).toHaveLength(50);
+    expect(diagnostics).toContain(
+      '- README.md:3: missing\\-1.md — target does not exist\n',
+    );
+    expect(diagnostics).toContain(
+      '- README.md:52: missing\\-50.md — target does not exist\n',
+    );
+    expect(diagnostics).not.toContain('missing\\-51.md');
+    expect(diagnostics).not.toContain('missing\\-52.md');
+    expect(diagnostics.endsWith('\n\n52 total diagnostics; 2 not listed.\n')).toBe(
+      true,
+    );
+    expect(summaryOccurrences(summary)).toBe(1);
+  });
+
+  it('action-dist/index.cjs is current', async () => {
+    // Reuse the repository's established build script: --check regenerates the
+    // bundle in a temporary directory and compares it byte for byte with the
+    // committed artifact. This is the in-packet proof of bundle freshness.
+    const result = await runActionBuild(['--check']);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toContain(
+      'action entrypoint is reproducible: action-dist/index.cjs',
+    );
   });
 });

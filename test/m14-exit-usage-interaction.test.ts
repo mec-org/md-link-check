@@ -2125,6 +2125,13 @@ describe('M14 scope and compatibility', () => {
         'docs/m14-plan.md',
         'action-dist/index.cjs',
         'README.md',
+        // The owner-approved v0.4 charter (#44, 2093d17) edited these between
+        // M14 and M20. The M16 changed-path check already treats both as
+        // allowed charter files; listing them keeps this later-milestone
+        // re-check meaningful in a full checkout instead of failing on that
+        // pre-existing, authorized change. This revision changes neither file.
+        'PROJECT.md',
+        'ROADMAP.md',
         ...laterMilestonePaths,
       ]);
 

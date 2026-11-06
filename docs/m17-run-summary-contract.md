@@ -59,18 +59,37 @@ Expected bytes are checked in under `test/fixtures/m17-v03/`:
 - `cli-json.stdout.txt` — `--json` CLI stdout;
 - `action-annotations.txt` — workflow-command annotations, one per finding, in
   result order;
-- `action-outputs.txt` — the three summary-count records, in order.
+- `action-outputs.txt` — the three summary-count records, in order;
+- `special-annotations.txt` — action annotations for the M11 special-values
+  fixture, covering the property and message escapes;
+- `edge-annotations.txt` — formatter-boundary annotations covering CR/LF and
+  colon escaping plus the file, target, reason and message truncation bounds;
+- `cli-usage.stderr.txt`, `action-input-error.stderr.txt` — frozen stdout/stderr
+  routing for usage errors;
+- `manifest.json` — the tag provenance and a SHA-256 for every file above.
+
+`manifest.json` records tag `v0.3.0`, its tag object and commit
+(`4438906e6e6085c941faf3117c2aaca1824a073d`), the tagged
+`action-dist/index.cjs` SHA-256, and the capture command. The tag commit and the
+M17 base (`2093d1716358f9784ae2c40c2d6c97171c91d3fe`) do not differ for `src/`,
+`action-dist/index.cjs` or `action.yml`;
+`git diff v0.3.0 2093d171 -- src action-dist/index.cjs action.yml` is empty.
+`test/m17-capture-fixtures.mjs` reproduces every end-to-end expected file from a
+built v0.3.0 checkout, and a provenance test verifies every file's size and
+SHA-256 against the manifest.
 
 The tests are:
 
 - `test/m17-run-summary-contract.test.ts` — the wrapper receives all three
   counts and every finding with file, line, target and reason, in canonical
   order, through the structured seam rather than printed output;
-- `test/m17-v03-surface-regression.test.ts` — text, JSON, annotations and
-  outputs are byte-for-byte the frozen v0.3 bytes, with unchanged exit
-  behavior and no job summary;
-- `test/m15-committed-artifact.test.ts` — the committed
-  `action-dist/index.cjs` is reproduced from source.
+- `test/m17-v03-surface-regression.test.ts` — text, JSON, normal annotations,
+  escaping/truncation annotations, outputs, exit behavior, stdout/stderr
+  routing and the absence of a job summary are byte-for-byte the frozen v0.3
+  bytes;
+- `test/m15-committed-artifact.test.ts` — the M17 test added there rebuilds
+  `action-dist/index.cjs` from current source and requires byte equality with
+  the committed bundle; the existing freshness and reproducibility tests remain.
 
 ## Deliberately absent
 

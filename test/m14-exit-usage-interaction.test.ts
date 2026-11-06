@@ -2129,6 +2129,11 @@ describe('M14 scope and compatibility', () => {
         'test/m21-exit-summary-interaction.test.ts',
         'docs/m21-exit-usage-write-failure.md',
         'test/charter-pins.ts',
+        'test/m22-summary-modes.test.ts',
+        'test/m22-helpers.ts',
+        'test/m22-transport-policy.test.ts',
+        'test/m22-packet-verification.test.ts',
+        'docs/m22-offline-external-summary-coverage.md',
       ]);
       const permitted = new Set([
         'test/m14-exit-usage-interaction.test.ts',

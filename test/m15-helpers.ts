@@ -362,10 +362,16 @@ export function commitAvailable(sha: string): boolean {
  * Runs the committed artifact with the offline guard preloaded. The guard
  * records and refuses every practical network entry point and every filesystem
  * access beneath the audit cache root.
+ *
+ * `inputs` are the action's `INPUT_*` variables. `environment` supplies any
+ * runner-owned variables a test needs for the same invocation (`GITHUB_OUTPUT`
+ * and `GITHUB_STEP_SUMMARY`); an explicit `undefined` removes the inherited
+ * variable, and the audit cache root always wins over an inherited cache home.
  */
 export async function runArtifactUnderOfflineGuard(
   root: string,
   inputs: Record<string, string | undefined>,
+  environment: Record<string, string | undefined> = {},
 ) {
   const cacheRoot = join(root, 'audit-cache');
   const guardLog = join(root, 'audit-guard.log');
@@ -379,12 +385,27 @@ export async function runArtifactUnderOfflineGuard(
       delete env[key];
     }
   }
-  Object.assign(env, inputs, {
+  Object.assign(env, inputs);
+  for (const [key, value] of Object.entries(environment)) {
+    if (value === undefined) {
+      delete env[key];
+    } else {
+      env[key] = value;
+    }
+  }
+  Object.assign(env, {
     XDG_CACHE_HOME: cacheRoot,
     MDLC_ACCEPTANCE_CACHE_ROOT: cacheRoot,
     MDLC_ACCEPTANCE_GUARD_LOG: guardLog,
   });
-  if (!Object.prototype.hasOwnProperty.call(inputs, 'GITHUB_STEP_SUMMARY')) {
+  // The inherited host variables were removed above, so only a summary the
+  // caller explicitly supplies (through `inputs` or `environment`) suppresses
+  // the same writable default every M15–M21 action suite expects. A host
+  // GITHUB_STEP_SUMMARY can never leak into the child.
+  const callerProvidedSummary =
+    Object.prototype.hasOwnProperty.call(inputs, 'GITHUB_STEP_SUMMARY') ||
+    Object.prototype.hasOwnProperty.call(environment, 'GITHUB_STEP_SUMMARY');
+  if (!callerProvidedSummary) {
     env.GITHUB_STEP_SUMMARY = defaultStepSummaryPath();
   }
   const result = await runNode(ACTION_ARTIFACT_PATH, [], {

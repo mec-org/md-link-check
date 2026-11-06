@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildCommandLine, runAction } from '../src/action-runner.js';
@@ -171,18 +171,26 @@ describe('M9 action wrapper structured results', () => {
     expect(action.stderr).toBe('');
   });
 
-  it('action wrapper writes no step summary in M9', async () => {
+  it('action wrapper appends the M20 step summary without changing M9 results', async () => {
     const root = makeTempRoot();
+    const summaryPath = join(root, 'step-summary.md');
 
-    // M13 owns the GITHUB_OUTPUT contract and its tests; M9 only proves that
-    // the action still writes no separate step-summary document.
+    // M20 owns the job-summary bytes and their tests. M9 proves only that
+    // adding the summary leaves the M9 structured result and CLI surface
+    // unchanged.
     const action = await captureAction({
       INPUT_PATHS: M9_CLEAN_FIXTURE,
-      GITHUB_STEP_SUMMARY: join(root, 'step-summary.md'),
+      GITHUB_STEP_SUMMARY: summaryPath,
     });
 
     expect(action.exitCode).toBe(0);
-    expect(existsSync(join(root, 'step-summary.md'))).toBe(false);
+    expect(action.diagnostics).toEqual([]);
+    expect(action.stdout).toBe(
+      'Checked 2 files: 0 broken targets, 1 external link skipped.\n',
+    );
+    expect(action.stderr).toBe('');
+    expect(existsSync(summaryPath)).toBe(true);
+    expect(readFileSync(summaryPath, 'utf8')).toContain('## Results\n');
   });
 
   it('action wrapper waits for asynchronous external checking', async () => {

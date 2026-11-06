@@ -130,10 +130,11 @@ export async function runAction(options: ActionRunOptions): Promise<ProcessResul
   if (options.cacheHome !== undefined) {
     env.XDG_CACHE_HOME = options.cacheHome;
   }
-  // A test child must not append to the runner's own GITHUB_OUTPUT file.
-  // Publication tests opt in through `options.env`, merged immediately below,
-  // with a temporary path of their own.
+  // A test child must not append to the runner's own GITHUB_OUTPUT or
+  // GITHUB_STEP_SUMMARY files. Publication tests opt in through `options.env`,
+  // merged immediately below, with temporary paths of their own.
   delete env.GITHUB_OUTPUT;
+  delete env.GITHUB_STEP_SUMMARY;
   for (const [key, value] of Object.entries(options.env ?? {})) {
     if (value === undefined) {
       delete env[key];

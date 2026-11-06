@@ -16,14 +16,19 @@
  * wrapper renders one GitHub workflow-command annotation per structured
  * broken-link finding and writes those lines to standard output. It then
  * publishes the checker's authoritative summary counts through the runner's
- * `GITHUB_OUTPUT` environment file without printing them. Direct CLI execution
- * never imports this module, the annotation formatter or the output publisher.
+ * `GITHUB_OUTPUT` environment file without printing them, and finally appends
+ * one M19-formatted job summary to the file named by `GITHUB_STEP_SUMMARY`.
+ * Direct CLI execution never imports this module, the annotation formatter, the
+ * output publisher or the step-summary writer.
  */
 import { formatAnnotations } from './annotation.js';
 import { publishSummaryOutputs } from './action-outputs.js';
+import { appendStepSummary } from './action-step-summary.js';
+import { formatRunSummaryMarkdown } from './summary-markdown.js';
 import {
   formatUsageErrorText,
   run,
+  type ActionSummary,
   type BrokenLinkResult,
   type CliIo,
   type RunResult,
@@ -73,22 +78,34 @@ export function createProcessIo(): CliIo {
 /**
  * Runs the CLI for one action invocation, emits one workflow-command annotation
  * per structured broken-link finding, publishes the completed check's summary
- * counts to the GitHub output file, and returns the CLI's exit code together
- * with the ordered, immutable findings and the authoritative summary. The
- * findings and counts come directly from the CLI's in-process result; the
+ * counts to the GitHub output file, appends one job summary when the runner
+ * supplies a `GITHUB_STEP_SUMMARY` destination, and returns the CLI's exit code
+ * together with the ordered, immutable findings and the authoritative summary.
+ * The findings and counts come directly from the CLI's in-process result; the
  * wrapper never reads, parses or re-renders its own output.
  *
  * The CLI writes its complete diagnostics and summary before this function
  * returns from `run(...)`, so every annotation line lands after the unchanged
  * CLI output. An empty finding list writes nothing, and the exit code is
- * returned exactly as the CLI produced it. Output publication appends its
- * records after the annotations and resolves before the wrapper returns, so
- * the values are complete when the action process finishes.
+ * returned exactly as the CLI produced it. Output publication and the job
+ * summary append both resolve before the wrapper returns, so the runner sees
+ * complete values when the action process finishes.
+ *
+ * The job summary is written from the same structured result and only once per
+ * completed check: the single {@link writeStepSummary} call below is the only
+ * summary write in the action path, and no module-global state is involved. It
+ * is written after the annotations and outputs, so the existing surfaces keep
+ * their exact order and a summary failure cannot suppress them. When the
+ * runner supplies no usable destination the completed check behaves exactly as
+ * before.
  *
  * An invalid input is reported through the same text-mode usage diagnostic and
  * exit code `2` as a CLI usage error, before any checking or network access
  * starts, and carries no findings. A usage or internal failure has no
- * authoritative summary, so no output records are published.
+ * authoritative summary, so no output records and no job summary are written.
+ * A summary append failure propagates to the action entrypoint's established
+ * internal-error path, exactly like an output-file failure; it is not turned
+ * into a broken-link result and is never silently swallowed.
  */
 export async function runAction(
   environment: NodeJS.ProcessEnv,
@@ -109,8 +126,39 @@ export async function runAction(
   emitAnnotations(result.diagnostics, io);
   if (result.summary !== null) {
     await publishSummaryOutputs(result.summary, environment);
+    await writeStepSummary(result.summary, result.diagnostics, environment);
   }
   return result;
+}
+
+/**
+ * Appends one complete job summary for a completed check, when the supplied
+ * action environment names a usable destination.
+ *
+ * The M17 summary and findings are passed directly to the M19
+ * {@link formatRunSummaryMarkdown}, which owns the grammar, the M18 escaping,
+ * the 50-diagnostic limit and the runtime count guard; this function neither
+ * rewrites the counts nor catches the guard's error. It then appends the
+ * formatter's complete output once, with no separator of its own, so every
+ * pre-existing byte is preserved and the summary is not printed anywhere. An
+ * absent or empty `GITHUB_STEP_SUMMARY` is unavailable: nothing is formatted or
+ * written.
+ *
+ * This is the single action-only integration point between the structured run
+ * result and the M19 formatter. It is exported so tests can prove that a
+ * count/finding mismatch reaches the M19 guard unchanged and writes nothing.
+ */
+export async function writeStepSummary(
+  summary: ActionSummary,
+  findings: readonly BrokenLinkResult[],
+  environment: NodeJS.ProcessEnv,
+): Promise<void> {
+  const destination = environment.GITHUB_STEP_SUMMARY;
+  if (destination === undefined || destination === '') {
+    return;
+  }
+
+  await appendStepSummary(destination, formatRunSummaryMarkdown(summary, findings));
 }
 
 /**

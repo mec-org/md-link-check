@@ -1,0 +1,79 @@
+/**
+ * M20 — direct-CLI isolation from the GitHub Actions job summary.
+ *
+ * The summary writer is action-only: a direct `md-link-check` invocation must
+ * neither read nor alter `GITHUB_STEP_SUMMARY`, even when the runner sets that
+ * variable for the step. These tests invoke the built CLI (`dist/cli.js`), not
+ * the action entrypoint, with a seeded summary file and assert the bytes, the
+ * CLI output and the exit code are unchanged.
+ */
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { REPO_ROOT, runCli } from './action-helpers.js';
+import { makeTempRoot, writeFiles } from './helpers.js';
+
+describe('M20 direct CLI summary isolation', () => {
+  it('direct CLI execution does not alter GITHUB_STEP_SUMMARY', async () => {
+    const root = makeTempRoot();
+    const fixture = join(root, 'fixture');
+    writeFiles(fixture, {
+      'README.md': '# Clean fixture\n\n[guide](docs/guide.md)\n',
+      'docs/guide.md': '# Guide\n',
+    });
+    const summaryPath = join(root, 'step-summary.md');
+    const seed = 'prior summary bytes\n\n- keep: this exactly\n';
+    writeFileSync(summaryPath, seed);
+    const environment = {
+      GITHUB_STEP_SUMMARY: summaryPath,
+      XDG_CACHE_HOME: join(root, 'cache-home'),
+    };
+
+    const clean = await runCli(['--', '.'], { cwd: fixture, env: environment });
+
+    expect(clean.status).toBe(0);
+    expect(clean.stdout).toBe(
+      'Checked 2 files: 0 broken targets, 0 external links skipped.\n',
+    );
+    expect(clean.stderr).toBe('');
+    expect(clean.stdout).not.toContain('## Results');
+    expect(clean.stdout).not.toContain('::error ');
+    expect(readFileSync(summaryPath, 'utf8')).toBe(seed);
+
+    // A broken direct CLI run is equally isolated.
+    writeFiles(fixture, {
+      'README.md': '# Broken fixture\n\n[missing](missing.md)\n',
+    });
+    const broken = await runCli(['--', '.'], { cwd: fixture, env: environment });
+
+    expect(broken.status).toBe(1);
+    expect(broken.stdout).toBe(
+      'README.md:3: missing.md — target does not exist\n' +
+        'Checked 2 files: 1 broken target, 0 external links skipped.\n',
+    );
+    expect(broken.stderr).toBe('');
+    expect(broken.stdout).not.toContain('## Results');
+    expect(readFileSync(summaryPath, 'utf8')).toBe(seed);
+
+    // JSON mode never writes it either.
+    const json = await runCli(['--json', '--', '.'], {
+      cwd: fixture,
+      env: environment,
+    });
+    expect(json.status).toBe(1);
+    expect(json.stderr).toBe('');
+    expect(readFileSync(summaryPath, 'utf8')).toBe(seed);
+  });
+
+  it('direct CLI sources do not reference the action summary writer', () => {
+    const cli = readFileSync(join(REPO_ROOT, 'dist', 'cli.js'), 'utf8');
+    const run = readFileSync(join(REPO_ROOT, 'dist', 'run.js'), 'utf8');
+
+    for (const text of [cli, run]) {
+      expect(text).not.toContain('GITHUB_STEP_SUMMARY');
+      expect(text).not.toContain('summary-markdown');
+      expect(text).not.toContain('action-step-summary');
+      expect(text).not.toContain('action-runner');
+    }
+  });
+});

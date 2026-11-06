@@ -369,7 +369,11 @@ export async function runArtifactUnderOfflineGuard(
   const guardLog = join(root, 'audit-guard.log');
   const env: NodeJS.ProcessEnv = { ...process.env };
   for (const key of Object.keys(env)) {
-    if (key.startsWith('INPUT_') || key === 'GITHUB_OUTPUT') {
+    if (
+      key.startsWith('INPUT_') ||
+      key === 'GITHUB_OUTPUT' ||
+      key === 'GITHUB_STEP_SUMMARY'
+    ) {
       delete env[key];
     }
   }

@@ -147,6 +147,127 @@ function formatCount(value, field) {
   return String(value);
 }
 
+// src/action-step-summary.ts
+var import_promises2 = require("node:fs/promises");
+async function appendStepSummary(destination, markdown) {
+  await (0, import_promises2.appendFile)(destination, markdown, "utf8");
+}
+
+// src/summary-markdown.ts
+var CHARACTER_ENCODINGS = /* @__PURE__ */ new Map([
+  ["\\", "\\\\\\\\"],
+  ["`", "\\`"],
+  ["|", "\\|"],
+  ["*", "\\*"],
+  ["_", "\\_"],
+  ["[", "\\["],
+  ["]", "\\]"],
+  ["<", "&lt;"],
+  [">", "&gt;"],
+  ["&", "&amp;"],
+  ["#", "\\#"],
+  ["~", "\\~"],
+  ["-", "\\-"],
+  ["+", "\\+"],
+  [":", "\\:"],
+  ["=", "\\="],
+  ["$", "\\u0024"],
+  ["\n", "\\n"],
+  ["\r", "\\r"],
+  ["	", "\\t"]
+]);
+function escapeSummaryValue(value) {
+  const orderedMarkerIndex = orderedMarkerPunctuationIndex(value);
+  const leadingSpaces = leadingSpacesToEncode(value);
+  let escaped = "";
+  let index = 0;
+  for (const character of value) {
+    escaped += encodeCharacter(
+      character,
+      value,
+      index,
+      orderedMarkerIndex,
+      leadingSpaces
+    );
+    index += character.length;
+  }
+  return escaped;
+}
+function encodeCharacter(character, value, index, orderedMarkerIndex, leadingSpaces) {
+  if (character === " " && index < leadingSpaces) {
+    return "&#32;";
+  }
+  const encoding = CHARACTER_ENCODINGS.get(character);
+  if (encoding !== void 0) {
+    return encoding;
+  }
+  if (index === orderedMarkerIndex && (character === "." || character === ")")) {
+    return `\\${character}`;
+  }
+  if (character === "." && followsWww(value, index)) {
+    return "\\.";
+  }
+  const codePoint = character.codePointAt(0);
+  if (codePoint === void 0) {
+    return character;
+  }
+  if (codePoint <= 31 || codePoint === 127) {
+    return `\\u${codePoint.toString(16).padStart(4, "0")}`;
+  }
+  return character;
+}
+function leadingSpacesToEncode(value) {
+  const match = /^ +/.exec(value);
+  const count2 = match?.[0].length ?? 0;
+  return count2 >= 4 ? count2 : 0;
+}
+function orderedMarkerPunctuationIndex(value) {
+  const match = /^ {0,3}[0-9]{1,9}[.)](?=\s|$)/.exec(value);
+  if (match === null) {
+    return -1;
+  }
+  return match[0].length - 1;
+}
+function followsWww(value, dotIndex) {
+  if (dotIndex < 3) {
+    return false;
+  }
+  return value.slice(dotIndex - 3, dotIndex).toLowerCase() === "www";
+}
+var SUMMARY_DIAGNOSTIC_LIMIT = 50;
+function formatRunSummaryMarkdown(counts, diagnostics) {
+  if (counts.broken !== diagnostics.length) {
+    throw new Error(
+      `run summary counts and findings disagree: broken=${counts.broken}, findings=${diagnostics.length}`
+    );
+  }
+  const total = diagnostics.length;
+  const listed = diagnostics.slice(0, SUMMARY_DIAGNOSTIC_LIMIT);
+  const lines = [
+    "## Results",
+    "",
+    `- Checked: ${counts.filesChecked}`,
+    `- Broken: ${counts.broken}`,
+    `- External skipped: ${counts.externalSkipped}`
+  ];
+  if (listed.length > 0) {
+    lines.push("", "## Diagnostics", "");
+    for (const diagnostic of listed) {
+      lines.push(
+        `- ${escapeSummaryValue(diagnostic.file)}:${diagnostic.line}: ${escapeSummaryValue(diagnostic.target)} — ${escapeSummaryValue(diagnostic.reason)}`
+      );
+    }
+  }
+  if (total > SUMMARY_DIAGNOSTIC_LIMIT) {
+    lines.push(
+      "",
+      `${total} total diagnostics; ${total - SUMMARY_DIAGNOSTIC_LIMIT} not listed.`
+    );
+  }
+  return `${lines.join("\n")}
+`;
+}
+
 // src/checker.ts
 var import_node_fs2 = require("node:fs");
 var import_node_path2 = require("node:path");
@@ -2592,8 +2713,16 @@ async function runAction(environment, io2) {
   emitAnnotations(result.diagnostics, io2);
   if (result.summary !== null) {
     await publishSummaryOutputs(result.summary, environment);
+    await writeStepSummary(result.summary, result.diagnostics, environment);
   }
   return result;
+}
+async function writeStepSummary(summary, findings, environment) {
+  const destination = environment.GITHUB_STEP_SUMMARY;
+  if (destination === void 0 || destination === "") {
+    return;
+  }
+  await appendStepSummary(destination, formatRunSummaryMarkdown(summary, findings));
 }
 function emitAnnotations(findings, io2) {
   for (const annotation of formatAnnotations(findings)) {

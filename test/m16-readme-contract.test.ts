@@ -172,14 +172,17 @@ describe('M16 README v0.3 contract', () => {
 
   it('README release-tag statements match tags that exist', () => {
     const readme = readmeText();
+    // M23 brought these statements in line with the tags that actually exist:
+    // the owner-approved v0.3.0 tag now exists, while no v0.4 tag does.
     expect(readme).toContain('The `v0.2.0` tag exists');
-    expect(readme).toContain('no v0.3 release tag exists yet');
+    expect(readme).toContain('The `v0.3.0` tag exists');
+    expect(readme).not.toContain('no v0.3 release tag exists yet');
+    expect(readme).toContain('no v0.4 release tag exists yet');
     expect(readme).not.toContain('no release tag exists yet');
-    // The only local release tag observed at the M16 base is v0.2.0; the
-    // v0.2.0 tag predates annotations and outputs, so it must not be presented
-    // as the v0.3 action surface.
+    // The v0.2.0 tag predates annotations and outputs, so it must not be
+    // presented as the v0.3 action surface.
     expect(readme).toContain('The v0.2.0 tag does not contain the v0.3 annotations or outputs');
-    expect(readme).not.toMatch(/v0\.3\.0/);
+    expect(readme).not.toMatch(/v0\.4\.0/);
     for (const line of documentedUsesLines()) {
       expect(line).not.toMatch(/@v0\.2\.0$/);
     }
@@ -191,7 +194,8 @@ describe('M16 README v0.3 contract', () => {
     const usesLines = documentedUsesLines();
     expect(usesLines).toHaveLength(1);
     expect(usesLines[0]).toMatch(/^uses: mec-org\/md-link-check@<tag>$/);
-    expect(readme).toContain('`<tag>` is a placeholder for the v0.3 surface');
+    // No v0.4 release tag exists, so the v0.4 surface stays a placeholder.
+    expect(readme).toContain('`<tag>` is a placeholder for the v0.4 surface');
   });
 
   it('README does not claim npm publication', () => {
@@ -207,7 +211,7 @@ describe('M16 README v0.3 contract', () => {
     const readme = readmeText();
     expect(readme).toContain('The v0.3 release and tag decisions remain the owner\'s');
     expect(readme).toContain('the release and tag decision remains the owner\'s');
-    expect(readme).toContain('Create a v0.3 tag only after the owner\'s release decision');
+    expect(readme).toContain('Create a v0.4 tag only after the owner\'s release decision');
     expect(readme).toContain('M16 creates no tag or release');
   });
 

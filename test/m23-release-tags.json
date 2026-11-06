@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "source": "git tag --list in a full checkout at M23 base d8b312a79866291e0550d2fbdb9d68f192e39ead; each tag object and peeled commit re-verified with git rev-parse",
+  "verifiedAt": "2026-11-06",
+  "tags": {
+    "v0.2.0": {
+      "tagObject": "3b81b09ef1fda1e4cef5b8903e62a80ea8d6d018",
+      "commit": "b87260f2b5ee46f5b50758c8f69f5dc3c93cff39"
+    },
+    "v0.3.0": {
+      "tagObject": "391e0961b6b024d2458d17932927bf72bc173db3",
+      "commit": "4438906e6e6085c941faf3117c2aaca1824a073d"
+    }
+  },
+  "v04Tag": null
+}

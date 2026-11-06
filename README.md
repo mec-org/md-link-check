@@ -1,10 +1,10 @@
 # md-link-check
 
-md-link-check is an offline CLI that finds broken relative links, images and heading anchors in a repository's Markdown. It is the software factory's pilot app: small, low-stakes, and checked against real docs. v0.2 added explicit HTML anchors and raw HTML links and images, opt-in external URL checking with a persistent result cache, and a GitHub Action on top of the v0.1 Markdown checks, still with no runtime dependencies. v0.3 adds CI-facing results to that GitHub Action — one workflow annotation per broken-link finding and three summary-count outputs — while the direct CLI keeps its text output, JSON schema, options, offline default and exit codes unchanged. The package is not published to npm.
+md-link-check is an offline CLI that finds broken relative links, images and heading anchors in a repository's Markdown. It is the software factory's pilot app: small, low-stakes, and checked against real docs. v0.2 added explicit HTML anchors and raw HTML links and images, opt-in external URL checking with a persistent result cache, and a GitHub Action on top of the v0.1 Markdown checks, still with no runtime dependencies. v0.3 added CI-facing results to that GitHub Action — one workflow annotation per broken-link finding and three summary-count outputs — and v0.4 adds an action job-page summary of the run's counts and first broken links, while the direct CLI keeps its text output, JSON schema, options, offline default and exit codes unchanged. The package is not published to npm.
 
 See [PROJECT.md](PROJECT.md) for the charter, [ROADMAP.md](ROADMAP.md) for the milestones and [CONTRIBUTING.md](CONTRIBUTING.md) for who may open issues and pull requests.
 
-> **Status: the v0.3 interface is implemented and tested in this repository.** Inline and reference-style links and images, heading anchors, explicit `<a id>`/`<a name>` anchors, raw HTML `<a href>` links and `<img src>` images, stable text output, `--json`, the documented exit codes, bounded `--external` network checking with a persistent result cache, the checked-in tagged-ref GitHub Action entrypoint, one workflow annotation per broken-link finding, and the three summary-count action outputs are implemented. The `v0.2.0` tag exists and marks the v0.2 interface; no v0.3 release tag exists yet, so the action example below uses the `<tag>` placeholder for the v0.3 action surface. The v0.3 release and tag decisions remain the owner's. The package is not published to npm. See [Non-goals](#non-goals) and [Current limitations](#current-limitations).
+> **Status: the v0.4 interface is implemented and tested in this repository.** Inline and reference-style links and images, heading anchors, explicit `<a id>`/`<a name>` anchors, raw HTML `<a href>` links and `<img src>` images, stable text output, `--json`, the documented exit codes, bounded `--external` network checking with a persistent result cache, the checked-in tagged-ref GitHub Action entrypoint, one workflow annotation per broken-link finding, the three summary-count action outputs, and the action-only job summary are implemented. The `v0.2.0` tag exists and marks the v0.2 interface. The `v0.3.0` tag exists and marks the v0.3 action surface at commit `4438906e6e6085c941faf3117c2aaca1824a073d`; no v0.4 release tag exists yet, so the action example below uses the `<tag>` placeholder for the v0.4 action surface. The v0.3 release and tag decisions remain the owner's; so does the v0.4 release and tag decision. M23 creates no tag or release. The package is not published to npm. See [Non-goals](#non-goals) and [Current limitations](#current-limitations).
 
 ## Requirements
 
@@ -533,7 +533,7 @@ The repository root contains `action.yml` and a checked-in, self-contained JavaS
     external: false
 ```
 
-`<tag>` is a placeholder for the v0.3 surface: **the `v0.2.0` tag exists, but no v0.3 release tag exists yet**, and the release and tag decision remains the owner's. The v0.2.0 tag does not contain the v0.3 annotations or outputs, so do not use it for the v0.3 action behavior. Until an immutable v0.3 release tag is created, use a branch name or commit SHA only for experiments; rely on an immutable tag for a real dependency. M16 creates no tag or release.
+`<tag>` is a placeholder for the v0.4 surface. The `v0.2.0` and `v0.3.0` tags exist; `v0.3.0` marks the v0.3 action surface (annotations and outputs) at commit `4438906e6e6085c941faf3117c2aaca1824a073d`, while **no v0.4 release tag exists yet**, and the release and tag decision remains the owner's. The v0.2.0 tag does not contain the v0.3 annotations or outputs, and the v0.3.0 tag does not contain the v0.4 job summary, so do not use either tag for behavior it predates. Until an immutable v0.4 release tag is created, use a branch name or commit SHA only for experiments; rely on an immutable tag for a real dependency. M16 creates no tag or release; M23 creates no v0.4 tag or release.
 
 The action has exactly two inputs:
 
@@ -558,6 +558,43 @@ The values are decimal base-10 strings published through the runner's `GITHUB_OU
 ```
 
 Direct CLI runs never read or write `GITHUB_OUTPUT`: the CLI has no GitHub outputs and needs no GitHub Actions environment.
+
+### Job summary
+
+When the action runs where GitHub Actions provides a job summary file (`GITHUB_STEP_SUMMARY`), it appends exactly one Markdown fragment for the run, after the CLI output, the annotations and the outputs. A direct CLI run never writes a step summary, even when the variable is set; only the action reads it.
+
+The fragment starts with `## Results` and shows the three authoritative counts, using the same values as the JSON summary and the action outputs:
+
+- `Checked`: the value of `summary.filesChecked`, also published as `files-checked`;
+- `Broken`: the value of `summary.broken`, also published as `broken`;
+- `External skipped`: the value of `summary.externalSkipped`, also published as `external-skipped`.
+
+When the run reported broken links, a `## Diagnostics` section follows. It lists the first 50 diagnostics in the CLI's result order with the same `file:line: target — reason` content; findings are never sorted, grouped or deduplicated. The 50 is a documented constant. When there are more than 50, the summary states the total number of broken links and how many are not listed, for example `52 total diagnostics; 2 not listed.`; findings after the first 50 are not listed. The full run still prints every diagnostic and emits one annotation per finding, so the limit applies only to the job summary.
+
+File names, targets and reasons are escaped for inline Markdown before they are written, so a value cannot add a heading, list item, table row, link or HTML structure, and each diagnostic stays exactly one entry. Escaped values render back as the intended text, except a literal backslash and `$`, which render as visible escapes so they cannot form Markdown or math. A run with no broken links omits the diagnostics section and contains only the three count lines.
+
+The append happens exactly once per action invocation and preserves any bytes already in the destination. If `GITHUB_STEP_SUMMARY` is unset or empty, no summary is written and exactly one `::warning::` line reports it. If an existing destination rejects the append, no summary is written and exactly one `::warning::` line reports it. In both cases the run's printed output, annotations, outputs and exit code stay authoritative: 0 for a clean run, 1 when at least one broken link was reported, 2 for a usage error.
+
+A usage error that happens before checking gets a fixed fragment with `- Outcome: usage error` and `- Link check: not performed`; it invents no counts and lists no broken link. An internal failure has no defined summary content but still reports an unavailable destination once as a warning.
+
+Summary generation performs no link checking and no network request of its own. In the default offline mode external links are still counted as skipped; with `external: true` their existing classifications contribute to the same counts and diagnostic entries. No transport policy is added or changed by the summary.
+
+Example fragment for a small broken run:
+
+```markdown
+## Results
+
+- Checked: 2
+- Broken: 2
+- External skipped: 1
+
+## Diagnostics
+
+- docs/guide.md:3: api.md — target does not exist
+- docs/guide.md:7: \#install — anchor does not exist
+```
+
+The second diagnostics value is written escaped (`\#install`) and renders as `#install`.
 
 The entrypoint is resolved from the action checkout; the process working directory stays the caller's workspace. The action does not install, build or run anything in the caller's repository.
 
@@ -618,7 +655,7 @@ The step fails the job with exit `1` when a broken target is found and exit `2` 
 - The external cache is shared by every document checked by the same user account: the key is the network URL only, so the same URL is cached across repositories. There is no CLI flag to inspect, clear or bypass the cache, and no cross-process lock; delete the cache file to clear it. A URL with a sensitive query string is stored locally as part of its cache key, though credential-bearing URLs are never persisted.
 - Redirect handling follows the five statuses listed above. A 3xx response with no `Location` is treated as a successful final response by the existing 200-399 success rule. A redirect target containing credentials is rejected rather than followed.
 - Each HTTP request hop (initial attempt, retry or redirect) gets its own fresh timeout that starts only when the scheduler runs it, so queue wait is never charged. An attempt can therefore take up to `(maxRedirects + 1) × timeout`, and one target up to the attempts ceiling times that bound; a retry starts a new redirect chain.
-- The GitHub Action exposes only `paths` and `external`: it does not expose `--json`, timeout, retry, concurrency or cache settings. It emits one GitHub error annotation per broken-link finding after the CLI's own output, publishes the three `files-checked`, `broken` and `external-skipped` summary-count outputs described in [GitHub Action](#github-action), and external checking stays opt-in. A path containing a newline character cannot be represented in the newline-delimited `paths` input. The `v0.2.0` tag exists and marks the v0.2 action; no v0.3 release tag exists yet, and the action example uses the `<tag>` placeholder for the v0.3 surface. Create a v0.3 tag only after the owner's release decision, and use an immutable tag rather than a branch for a stable dependency.
+- The GitHub Action exposes only `paths` and `external`: it does not expose `--json`, timeout, retry, concurrency or cache settings. It emits one GitHub error annotation per broken-link finding after the CLI's own output, publishes the three `files-checked`, `broken` and `external-skipped` summary-count outputs described in [GitHub Action](#github-action), appends one job summary when a usable `GITHUB_STEP_SUMMARY` destination exists, and external checking stays opt-in. A path containing a newline character cannot be represented in the newline-delimited `paths` input. The `v0.2.0` and `v0.3.0` tags exist and mark the v0.2 and v0.3 action surfaces; no v0.4 release tag exists yet, and the action example uses the `<tag>` placeholder for the v0.4 surface. Create a v0.4 tag only after the owner's release decision, and use an immutable tag rather than a branch for a stable dependency.
 
 ## Development
 
@@ -631,4 +668,4 @@ npm run check:action # fail if the checked-in action entrypoint is stale
 npm ls --omit=dev    # runtime dependency check: must be empty
 ```
 
-The package has no runtime dependencies; TypeScript and Vitest are development dependencies only. The test suite does not contact the public internet: tests that exercise real network behavior use local loopback HTTP fixtures on ephemeral ports, and the rest inject a fetch stub.
+The package has no runtime dependencies; TypeScript and Vitest are development dependencies only. The test suite does not contact the public internet: tests that exercise real network behavior use local loopback HTTP fixtures on ephemeral ports, and the rest inject a fetch stub. The v0.4 acceptance evidence, including the offline real-docs runs, is recorded in [docs/m23-acceptance.md](docs/m23-acceptance.md).

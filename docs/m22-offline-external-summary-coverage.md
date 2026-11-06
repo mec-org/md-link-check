@@ -128,11 +128,13 @@ Assertions in both modes:
 
 `summary generation performs no additional external request` freezes the existing
 transport behavior: two distinct targets produce exactly two `GET` requests
-(`/ok` and `/not-found`) and two fetch-guard entries. The summary is formatted and
-appended only after `run(...)` returns. Re-reading the summary and the transport
-evidence still shows two requests; no fetch, retry or cache revalidation is
-added. The terminal `404` deliberately produces one attempt, not two, and the
-frozen count of two proves the summary path added none.
+(`/ok` and `/not-found`) and two fetch-guard entries for the whole invocation,
+including the later summary formatting and append. A differential control then
+runs the same fixture and transport with **no** summary destination (the M21
+absent case): it performs exactly the same two requests. The summary path
+therefore added no fetch, retry or cache revalidation. The terminal `404`
+deliberately produces one attempt, not two, and the frozen count of two proves
+the summary path added none.
 
 ## Preserved action surfaces
 
@@ -151,25 +153,84 @@ Nothing in the summary is printed to stdout or stderr.
 
 ## Tests
 
-`test/m22-summary-modes.test.ts` contains exactly the six named
+`test/m22-summary-modes.test.ts` contains the six named mode
 responsibilities:
 
 1. `default offline action attempts no HTTP or HTTPS request`
 2. `default offline summary matches the run`
 3. `external action uses only a loopback server`
 4. `external summary matches the run`
-5. `summary generation performs no additional external request`
+5. `summary generation performs no additional external request` — includes the
+   no-summary differential control
 6. `both summary modes preserve established action surfaces`
+
+`test/m22-transport-policy.test.ts` adds the existing-policy scenarios through
+the real action path with a writable temporary summary:
+
+1. `redirect policy and summary stay unchanged` — the 302 is followed once and
+   the summary matches the final success;
+2. `retry policy and summary stay unchanged` — the first 500 is retried once and
+   the summary matches the eventual success;
+3. `exhausted timeout policy and summary stay unchanged` — the existing retry
+   count and `external request timed out after 2 attempts` reason are frozen
+   (a test-only 50 ms timeout shortens the wait, no production knob is added);
+4. `fresh cache suppresses the request without changing the summary` — the
+   second run makes no request and keeps the same CLI text and summary.
+
+`test/m22-packet-verification.test.ts` covers the remaining acceptance criteria
+in the packet:
+
+1. `direct CLI ignores summary destinations and writes no summary` — writable,
+   seeded summary/output files keep their bytes, an unusable destination is not
+   created, and no warning is emitted by the CLI;
+2. `M21 unavailable summary destinations keep their warnings and results` — the
+   exact unset and unwritable warning lines, one each, with the unchanged broken
+   result, outputs and stdout;
+3. `owner-approved charter pins and the v0.3 tag remain intact` — the pin table
+   and both blob hashes are restated independently, and a local `v0.3*` tag must
+   be exactly `v0.3.0` at the owner-approved commit (a shallow CI checkout may
+   carry none);
+4. `action-dist/index.cjs is current` — the established
+   `scripts/build-action.mjs --check`;
+5. `repository typecheck and scope checks pass` — `npm run typecheck` and
+   `scripts/check-scope.mjs --json` are executed in-packet; the full repository
+   test suite is this packet itself, run by CI as `npm test`;
+6. `offline-guard helper never inherits a host summary destination` — inherited
+   `GITHUB_STEP_SUMMARY`/`GITHUB_OUTPUT` bytes stay untouched and the guarded
+   invocation uses the helper's own writable default instead.
+
+`test/m22-helpers.ts` owns the shared fixtures, independent expectation oracles,
+the process-isolated in-process invocation, the temporary-summary artifact
+invocation and the small log parsers.
+
+### Merge-gate acceptance criteria to in-packet evidence
+
+| Acceptance criterion | In-packet evidence |
+| --- | --- |
+| Default action with external targets attempts no HTTP(S) request | `default offline action attempts no HTTP or HTTPS request` (offline guard, no guard log, no server request) |
+| Offline summary counts and ordered diagnostics match the run | `default offline summary matches the run` (structured result vs hard-coded summary) |
+| Skipped external targets keep the existing classification | `default offline summary matches the run` and mode test 6 |
+| External tests use only a loopback server on an ephemeral port | `external action uses only a loopback server` |
+| External counts, classifications, reasons and order match the summary | `external summary matches the run` |
+| Summary generation adds no request, retry or revalidation | `summary generation performs no additional external request` plus the no-summary differential |
+| Existing redirect, retry, timeout and cache policy unchanged | `test/m22-transport-policy.test.ts` |
+| CLI text, annotations, outputs, ordering, exits and M21 warnings unchanged | mode test 6 and `M21 unavailable summary destinations keep their warnings and results` |
+| Direct CLI summary isolation unchanged | `direct CLI ignores summary destinations and writes no summary` |
+| Owner-approved charter pins and v0.3 tag intact | `owner-approved charter pins and the v0.3 tag remain intact` |
+| `action-dist/index.cjs` regenerated and current | `action-dist/index.cjs is current` |
+| All repository tests, type checks, builds, scope, charter and artifact checks pass | `repository typecheck and scope checks pass`, the in-packet bundle check, and the green CI `npm test` run of this packet |
 
 The existing `test/m15-helpers.ts` offline-guard helper gained an optional
 `environment` argument so a guarded invocation can also supply its temporary
 `GITHUB_OUTPUT` and `GITHUB_STEP_SUMMARY`; the audit cache root still wins over
-any inherited cache home.
+any inherited cache home. Its default-summary decision now checks only what the
+caller explicitly provided through `inputs` or `environment`, while every
+inherited host `INPUT_*`/`GITHUB_OUTPUT`/`GITHUB_STEP_SUMMARY` is removed first,
+so no host step-summary value can leak into a guarded child.
 
 `test/m14-exit-usage-interaction.test.ts` lists later milestones' files
 explicitly so its own authorized-base check keeps running on later branches.
-That list gained the two M22 paths (`test/m22-summary-modes.test.ts` and
-`docs/m22-offline-external-summary-coverage.md`) exactly as earlier milestones
+That list gained the M22 test/helper/doc paths exactly as earlier milestones
 added theirs; no rule, hash or tag assertion was weakened.
 
 ## Assumptions found false or resolved
@@ -199,18 +260,21 @@ added theirs; no rule, hash or tag assertion was weakened.
   (404, terminal) already have frozen classifications and reason strings, and
   the offline HTTP(S) targets already have the frozen skipped treatment.
 
-
 ## Charter pins and v0.3 tag
 
 M22 changes no owner-approved charter file. `test/charter-pins.ts`,
-`test/m16-artifact-scope.test.ts`, and the pinned v0.3 artifact checks remain
-green, and the `v0.3.0` tag is neither moved nor recreated. Only `test/` and
-`docs/` paths changed.
+`test/m16-artifact-scope.test.ts`, the in-packet
+`owner-approved charter pins and the v0.3 tag remain intact` test, and the pinned
+v0.3 artifact checks confirm the two pinned blob hashes and that a local `v0.3*`
+tag is exactly `v0.3.0` at `4438906e6e6085c941faf3117c2aaca1824a073d`. The tag is
+neither moved nor recreated. Only `test/` and `docs/` paths changed.
 
 ## Bundle regeneration
 
 No production module changed, so the action build is byte-identical to the
-committed bundle. The established commands were run anyway:
+committed bundle. The established commands were run anyway, and the in-packet
+`action-dist/index.cjs is current` test executes the same reproducible-build
+check:
 
 ```bash
 npm run build:action   # regenerate action-dist/index.cjs (no diff)
@@ -230,8 +294,9 @@ node scripts/check-scope.mjs
 Results in this checkout (Node 26.12.0; CI runs the same suite on Node 22):
 
 - `npm run typecheck` — passed;
-- `npm test` — 59 test files, 1338 tests passed (the `pretest` TypeScript
-  build ran first);
+- `npm test` — 61 test files, 1348 tests passed (the `pretest` TypeScript
+  build ran first); the packet itself re-runs typecheck, the scope check and the
+  reproducible-build check;
 - `npm run build:action` — built `action-dist/index.cjs`; the committed bundle
   is byte-identical, so no artifact diff;
 - `npm run check:action` — `action entrypoint is reproducible:
@@ -242,7 +307,7 @@ Results in this checkout (Node 26.12.0; CI runs the same suite on Node 22):
   `CHARTER_FILE_PINS`; `v0.3.0` still points at
   `4438906e6e6085c941faf3117c2aaca1824a073d`.
 
-The repeated full-suite runs were made sequentially; concurrent Vitest
-invocations of this repository contend for the same build outputs and are not
-used as evidence.
+The full-suite run is sequential. The packet's own green CI run executes
+`npm test` on Node 22 after the typecheck step, so "all repository tests pass"
+is demonstrated by the same packet rather than by a prose claim.
 

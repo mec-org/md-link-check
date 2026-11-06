@@ -398,7 +398,14 @@ export async function runArtifactUnderOfflineGuard(
     MDLC_ACCEPTANCE_CACHE_ROOT: cacheRoot,
     MDLC_ACCEPTANCE_GUARD_LOG: guardLog,
   });
-  if (!Object.prototype.hasOwnProperty.call(env, 'GITHUB_STEP_SUMMARY')) {
+  // The inherited host variables were removed above, so only a summary the
+  // caller explicitly supplies (through `inputs` or `environment`) suppresses
+  // the same writable default every M15–M21 action suite expects. A host
+  // GITHUB_STEP_SUMMARY can never leak into the child.
+  const callerProvidedSummary =
+    Object.prototype.hasOwnProperty.call(inputs, 'GITHUB_STEP_SUMMARY') ||
+    Object.prototype.hasOwnProperty.call(environment, 'GITHUB_STEP_SUMMARY');
+  if (!callerProvidedSummary) {
     env.GITHUB_STEP_SUMMARY = defaultStepSummaryPath();
   }
   const result = await runNode(ACTION_ARTIFACT_PATH, [], {

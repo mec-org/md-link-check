@@ -2134,6 +2134,13 @@ describe('M14 scope and compatibility', () => {
         'test/m22-transport-policy.test.ts',
         'test/m22-packet-verification.test.ts',
         'docs/m22-offline-external-summary-coverage.md',
+        'test/m23-base-manifest.json',
+        'test/m23-helpers.ts',
+        'test/m23-readme-contract.test.ts',
+        'test/m23-release-tags.json',
+        'test/m23-scope.test.ts',
+        'test/m23-v04-hardening.test.ts',
+        'docs/m23-acceptance.md',
       ]);
       const permitted = new Set([
         'test/m14-exit-usage-interaction.test.ts',

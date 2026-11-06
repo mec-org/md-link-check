@@ -345,8 +345,12 @@ describe('M16 v0.3 changed-path scope', () => {
       );
     }
     expect(existsSync(join(REPO_ROOT, '.github', 'workflows', 'release.yml'))).toBe(false);
+    // M23 aligned the README with the tags that exist: the owner-approved
+    // v0.3.0 tag is named with its pinned commit, and no v0.4 tag is claimed.
     const readme = readFileSync(join(REPO_ROOT, 'README.md'), 'utf8');
     expect(readme).toContain('M16 creates no tag or release');
-    expect(readme).not.toMatch(/v0\.3\.0/);
+    expect(readme).toContain('The `v0.3.0` tag exists');
+    expect(readme).toContain(OWNER_APPROVED_V03_TAG_COMMIT);
+    expect(readme).not.toMatch(/v0\.4\.0/);
   });
 });

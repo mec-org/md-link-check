@@ -249,9 +249,8 @@ surface suites, the M16 artifact/scope suites and the M9–M15 action suites pas
 in the repository's standard check environment: GitHub Actions `CI`
 (`.github/workflows/ci.yml`, `pull_request` trigger: `npm run typecheck` and
 `npm test` on a Linux shallow checkout) plus the repository's CodeQL workflow.
-The live check runs and a locally reproduced CI-equivalent run are recorded in
-the CI-evidence section added by this review round's documentation-only commit
-and in the PR body.
+The live check runs and a locally reproduced CI-equivalent run are recorded
+under "CI evidence" below.
 
 The standard environment is a shallow checkout; a full local checkout
 additionally has every base commit and live tag. That difference exposes two
@@ -282,9 +281,34 @@ Other checks: `npm run check:action` reports
 `node scripts/check-scope.mjs` reports no change under `.github/` or
 `.project/`.
 
-The live check runs and a locally reproduced CI-equivalent run are recorded in
-the CI-evidence section added by this review round's documentation-only commit
-(and in the PR body).
+## CI evidence
+
+Recorded for the reviewed code head
+`ce099e21c6cc1df57e6f7155b3c21f6eaf123d4d`; the final documentation-only commit
+on this branch changes no code, test or bundle byte.
+
+**CI-equivalent reproduction** — the repository-standard checkout condition
+reproduced locally. The clone is one commit deep, fetches no tags and has no M14
+base commit, matching `.github/workflows/ci.yml`:
+
+```bash
+git clone --depth 1 --no-tags \
+  --branch agent/action-summary-integration-ec54ced0cb85 \
+  https://github.com/mec-org/md-link-check.git
+# HEAD=ce099e21c6cc1df57e6f7155b3c21f6eaf123d4d
+# tags=0, base be1c580 unavailable
+npm ci --ignore-scripts
+npm run typecheck   # pass
+npm test            # Test Files 57 passed (57)
+                    # Tests 1316 passed | 3 skipped (1319)
+```
+
+**Live GitHub Actions checks** at `ce099e2` — 4/4 success:
+
+- `test` — [CI run 42179886646 / job 127766794972](https://github.com/mec-org/md-link-check/actions/runs/42179886646/job/127766794972), pass.
+- `Analyze (actions)` — [run 42179880030 / job 127766779823](https://github.com/mec-org/md-link-check/actions/runs/42179880030/job/127766779823), pass.
+- `Analyze (javascript-typescript)` — [run 42179880030 / job 127766780133](https://github.com/mec-org/md-link-check/actions/runs/42179880030/job/127766780133), pass.
+- `CodeQL` — [run 127766932937](https://github.com/mec-org/md-link-check/runs/127766932937), pass.
 
 ## Assumptions found false or resolved
 

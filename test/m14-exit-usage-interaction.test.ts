@@ -35,6 +35,7 @@ import {
   runActionBuild,
   runCli,
   runNode,
+  withDefaultStepSummary,
 } from './action-helpers.js';
 import { makeTempRoot, writeFiles } from './helpers.js';
 import { parseAnnotation } from './m11-helpers.js';
@@ -158,7 +159,7 @@ async function captureSourceAction(
       stderr += text;
     },
   };
-  const result = await runSourceAction(environment, io);
+  const result = await runSourceAction(withDefaultStepSummary(environment), io);
   return {
     exitCode: result.exitCode,
     diagnostics: result.diagnostics,
@@ -2119,6 +2120,13 @@ describe('M14 scope and compatibility', () => {
         'test/cli-summary-isolation.test.ts',
         'test/m12-action-annotations.test.ts',
         'test/m9-action-result.test.ts',
+        'src/run.ts',
+        'src/annotation.ts',
+        'test/m12-action-internal-error.test.ts',
+        'test/m13-action-internal-error.test.ts',
+        'test/m13-action-outputs.test.ts',
+        'test/m21-exit-summary-interaction.test.ts',
+        'docs/m21-exit-usage-write-failure.md',
       ]);
       const permitted = new Set([
         'test/m14-exit-usage-interaction.test.ts',

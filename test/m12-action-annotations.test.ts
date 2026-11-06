@@ -26,6 +26,7 @@ import {
   runActionBuild,
   runCli,
   runNode,
+  withDefaultStepSummary,
 } from './action-helpers.js';
 import { makeTempRoot, writeFiles } from './helpers.js';
 import {
@@ -92,7 +93,7 @@ async function captureSourceAction(
       stderr += text;
     },
   };
-  const result = await runSourceAction(environment, io);
+  const result = await runSourceAction(withDefaultStepSummary(environment), io);
   return { exitCode: result.exitCode, diagnostics: result.diagnostics, stdout, stderr };
 }
 
@@ -348,7 +349,9 @@ describe('M12 source action annotation integration', () => {
       join(REPO_ROOT, 'src', 'action-runner.ts'),
       'utf8',
     );
-    expect(runnerSource).toContain("import { formatAnnotations } from './annotation.js';");
+    expect(runnerSource).toMatch(
+      /import \{[^}]*formatAnnotations[^}]*\} from '\.\/annotation\.js';/,
+    );
     expect(runnerSource).toContain('emitAnnotations(result.diagnostics, io)');
     expect(runnerSource).toContain('formatAnnotations(findings)');
     expect(runnerSource).not.toMatch(/JSON\.parse|readFileSync|readdirSync|child_process/);

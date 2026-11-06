@@ -29,8 +29,10 @@ import type { CliIo, RunResult } from '../src/run.js';
 import {
   ACTION_ARTIFACT_PATH,
   REPO_ROOT,
+  defaultStepSummaryPath,
   runAction as runCommittedAction,
   runNode,
+  withDefaultStepSummary,
 } from './action-helpers.js';
 import { writeFiles } from './helpers.js';
 
@@ -100,7 +102,7 @@ export async function captureSourceAction(
       stderr += text;
     },
   };
-  const result = await runSourceAction(environment, io);
+  const result = await runSourceAction(withDefaultStepSummary(environment), io);
   return {
     exitCode: result.exitCode,
     diagnostics: result.diagnostics,
@@ -382,6 +384,9 @@ export async function runArtifactUnderOfflineGuard(
     MDLC_ACCEPTANCE_CACHE_ROOT: cacheRoot,
     MDLC_ACCEPTANCE_GUARD_LOG: guardLog,
   });
+  if (!Object.prototype.hasOwnProperty.call(inputs, 'GITHUB_STEP_SUMMARY')) {
+    env.GITHUB_STEP_SUMMARY = defaultStepSummaryPath();
+  }
   const result = await runNode(ACTION_ARTIFACT_PATH, [], {
     cwd: root,
     env,

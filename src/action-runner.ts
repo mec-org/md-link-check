@@ -16,15 +16,25 @@
  * wrapper renders one GitHub workflow-command annotation per structured
  * broken-link finding and writes those lines to standard output. It then
  * publishes the checker's authoritative summary counts through the runner's
- * `GITHUB_OUTPUT` environment file without printing them, and finally appends
- * one M19-formatted job summary to the file named by `GITHUB_STEP_SUMMARY`.
- * Direct CLI execution never imports this module, the annotation formatter, the
- * output publisher or the step-summary writer.
+ * `GITHUB_OUTPUT` environment file without printing them, and finally handles
+ * the M19/M21 job summary for the file named by `GITHUB_STEP_SUMMARY`.
+ *
+ * M21 keeps every established action result authoritative while the job
+ * summary is active. A completed check (clean or broken) and a usage error each
+ * get one summary when a destination exists; an unset, empty or unwritable
+ * destination produces exactly one workflow-command warning instead. The
+ * summary is the last action publication, so its success or failure can never
+ * replace, suppress, upgrade, downgrade or reinterpret the CLI's `0`, `1` or
+ * `2`. Direct CLI execution never imports this module, the annotation
+ * formatter, the output publisher or the step-summary writer.
  */
-import { formatAnnotations } from './annotation.js';
+import { formatAnnotations, formatWarningCommand } from './annotation.js';
 import { publishSummaryOutputs } from './action-outputs.js';
 import { appendStepSummary } from './action-step-summary.js';
-import { formatRunSummaryMarkdown } from './summary-markdown.js';
+import {
+  formatRunSummaryMarkdown,
+  formatUsageErrorSummaryMarkdown,
+} from './summary-markdown.js';
 import {
   formatUsageErrorText,
   run,
@@ -41,6 +51,45 @@ export interface ActionInputs {
 
 /** A usage error caused by an action input rather than by the CLI arguments. */
 export class ActionInputError extends Error {}
+
+/**
+ * The one stable warning message for an action invocation whose summary
+ * destination is unset or empty. The empty string is treated exactly like an
+ * unset variable: neither names a usable file, so no filesystem access is
+ * attempted. The workflow-command encoding is supplied by
+ * {@link formatWarningCommand}; this message is fixed, so no path or
+ * environment value can leak into a warning.
+ */
+export const STEP_SUMMARY_UNAVAILABLE_WARNING =
+  'GITHUB_STEP_SUMMARY is not set; no job summary was written.';
+
+/**
+ * The one stable warning message for a destination that exists but rejects the
+ * single append attempt. The raw filesystem error is never interpolated: only
+ * this fixed classification is reported, so no arbitrary error object or
+ * destination is exposed.
+ */
+export const STEP_SUMMARY_WRITE_FAILED_WARNING =
+  'GITHUB_STEP_SUMMARY could not be written; no job summary was written.';
+
+/**
+ * The summary content that belongs to one action outcome.
+ *
+ * - `completed`: a clean or broken check with its authentic M17 counts and
+ *   ordered findings, formatted by the guarded M19 formatter.
+ * - `usage-error`: the fixed M21 usage-error fragment, which carries no run
+ *   counts and no broken-link diagnostics.
+ * - `none`: an internal failure or help, for which no summary content is
+ *   defined. An unavailable destination is still reported once as a warning.
+ */
+export type StepSummaryOutcome =
+  | {
+      readonly kind: 'completed';
+      readonly summary: ActionSummary;
+      readonly findings: readonly BrokenLinkResult[];
+    }
+  | { readonly kind: 'usage-error' }
+  | { readonly kind: 'none' };
 
 /**
  * Reads the action inputs. `paths` is newline-delimited: each line is trimmed,
@@ -78,34 +127,25 @@ export function createProcessIo(): CliIo {
 /**
  * Runs the CLI for one action invocation, emits one workflow-command annotation
  * per structured broken-link finding, publishes the completed check's summary
- * counts to the GitHub output file, appends one job summary when the runner
- * supplies a `GITHUB_STEP_SUMMARY` destination, and returns the CLI's exit code
- * together with the ordered, immutable findings and the authoritative summary.
+ * counts to the GitHub output file, and handles the job summary, then returns
+ * the CLI's exit code together with the ordered, immutable findings, the
+ * authoritative summary and the outcome classification.
+ *
  * The findings and counts come directly from the CLI's in-process result; the
- * wrapper never reads, parses or re-renders its own output.
+ * wrapper never reads, parses or re-renders its own output. The CLI writes its
+ * complete diagnostics and summary before this function returns from `run(...)`,
+ * so every annotation line lands after the unchanged CLI output. An empty
+ * finding list writes nothing, and the exit code is returned exactly as the CLI
+ * produced it.
  *
- * The CLI writes its complete diagnostics and summary before this function
- * returns from `run(...)`, so every annotation line lands after the unchanged
- * CLI output. An empty finding list writes nothing, and the exit code is
- * returned exactly as the CLI produced it. Output publication and the job
- * summary append both resolve before the wrapper returns, so the runner sees
- * complete values when the action process finishes.
- *
- * The job summary is written from the same structured result and only once per
- * completed check: the single {@link writeStepSummary} call below is the only
- * summary write in the action path, and no module-global state is involved. It
- * is written after the annotations and outputs, so the existing surfaces keep
- * their exact order and a summary failure cannot suppress them. When the
- * runner supplies no usable destination the completed check behaves exactly as
- * before.
- *
- * An invalid input is reported through the same text-mode usage diagnostic and
- * exit code `2` as a CLI usage error, before any checking or network access
- * starts, and carries no findings. A usage or internal failure has no
- * authoritative summary, so no output records and no job summary are written.
- * A summary append failure propagates to the action entrypoint's established
- * internal-error path, exactly like an output-file failure; it is not turned
- * into a broken-link result and is never silently swallowed.
+ * The job summary is the final action publication and runs once per invocation:
+ * after the annotations and after the output publication. A completed check and
+ * a usage error each append one M21 fragment when the destination is usable; an
+ * unset or empty destination emits one warning and performs no write; a failed
+ * append emits one warning and preserves the original result. An internal
+ * failure has no defined summary content but still reports an unavailable
+ * destination exactly once. No summary or warning is printed in place of the
+ * CLI's text, and direct CLI execution never reaches this function.
  */
 export async function runAction(
   environment: NodeJS.ProcessEnv,
@@ -117,7 +157,13 @@ export async function runAction(
   } catch (error) {
     if (error instanceof ActionInputError) {
       io.writeError(formatUsageErrorText(error.message));
-      return { exitCode: 2, diagnostics: [], summary: null };
+      await writeStepSummary({ kind: 'usage-error' }, environment, io);
+      return {
+        exitCode: 2,
+        diagnostics: [],
+        summary: null,
+        outcome: 'usage-error',
+      };
     }
     throw error;
   }
@@ -126,39 +172,78 @@ export async function runAction(
   emitAnnotations(result.diagnostics, io);
   if (result.summary !== null) {
     await publishSummaryOutputs(result.summary, environment);
-    await writeStepSummary(result.summary, result.diagnostics, environment);
   }
+  await writeStepSummary(stepSummaryOutcome(result), environment, io);
   return result;
 }
 
 /**
- * Appends one complete job summary for a completed check, when the supplied
- * action environment names a usable destination.
+ * Maps the CLI's authoritative result onto the summary content that belongs to
+ * it. This reads only the structured `outcome` and `summary` fields; it never
+ * inspects printed text and never recomputes a count.
+ */
+function stepSummaryOutcome(result: RunResult): StepSummaryOutcome {
+  if (result.outcome === 'usage-error') {
+    return { kind: 'usage-error' };
+  }
+  if (result.outcome === 'checked' && result.summary !== null) {
+    return {
+      kind: 'completed',
+      summary: result.summary,
+      findings: result.diagnostics,
+    };
+  }
+  return { kind: 'none' };
+}
+
+/**
+ * Handles the one job-summary publication for an action invocation and reports
+ * exactly one warning when it cannot happen.
  *
- * The M17 summary and findings are passed directly to the M19
- * {@link formatRunSummaryMarkdown}, which owns the grammar, the M18 escaping,
- * the 50-diagnostic limit and the runtime count guard; this function neither
- * rewrites the counts nor catches the guard's error. It then appends the
- * formatter's complete output once, with no separator of its own, so every
- * pre-existing byte is preserved and the summary is not printed anywhere. An
- * absent or empty `GITHUB_STEP_SUMMARY` is unavailable: nothing is formatted or
- * written.
+ * The destination is resolved once from the action environment:
  *
- * This is the single action-only integration point between the structured run
- * result and the M19 formatter. It is exported so tests can prove that a
- * count/finding mismatch reaches the M19 guard unchanged and writes nothing.
+ * - absent or empty: no formatting and no filesystem access; one fixed
+ *   {@link STEP_SUMMARY_UNAVAILABLE_WARNING} workflow command is written;
+ * - present: the outcome's already-complete Markdown fragment is formatted and
+ *   appended once. `completed` uses the guarded M19 formatter unchanged (its
+ *   count guard still throws before an append); `usage-error` uses the fixed
+ *   zero-diagnostic M21 fragment; `none` writes nothing;
+ * - append rejected: one fixed {@link STEP_SUMMARY_WRITE_FAILED_WARNING}
+ *   workflow command is written and the raw error is discarded.
+ *
+ * The warning is emitted exactly once at this single call boundary, after the
+ * CLI output, the annotations and the output publication. It never replaces
+ * the underlying result and is never emitted for a successful append. This is
+ * the only summary write in the action path, so no module-global state or
+ * second call site is needed to guarantee "exactly once".
+ *
+ * Exported so focused tests can prove the M19 count guard still escapes before
+ * any write and that both warning classifications are produced here.
  */
 export async function writeStepSummary(
-  summary: ActionSummary,
-  findings: readonly BrokenLinkResult[],
+  outcome: StepSummaryOutcome,
   environment: NodeJS.ProcessEnv,
+  io: CliIo,
 ): Promise<void> {
   const destination = environment.GITHUB_STEP_SUMMARY;
   if (destination === undefined || destination === '') {
+    io.writeOut(`${formatWarningCommand(STEP_SUMMARY_UNAVAILABLE_WARNING)}\n`);
     return;
   }
 
-  await appendStepSummary(destination, formatRunSummaryMarkdown(summary, findings));
+  if (outcome.kind === 'none') {
+    return;
+  }
+
+  const markdown =
+    outcome.kind === 'completed'
+      ? formatRunSummaryMarkdown(outcome.summary, outcome.findings)
+      : formatUsageErrorSummaryMarkdown();
+
+  const status = await appendStepSummary(destination, markdown);
+  if (status === 'failed') {
+    io.writeOut(`${formatWarningCommand(STEP_SUMMARY_WRITE_FAILED_WARNING)}\n`);
+  }
 }
 
 /**

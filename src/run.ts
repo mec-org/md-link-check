@@ -53,6 +53,15 @@ export interface ActionSummary {
 }
 
 /**
+ * Classification of one CLI invocation. It names why the invocation ended, so
+ * the action can keep summary handling secondary without parsing printed text:
+ * `checked` for a completed check (clean or broken), `help` for `--help`,
+ * `usage-error` for invalid arguments or unreadable inputs, and
+ * `internal-error` for an unexpected failure that prevented checking.
+ */
+export type RunOutcome = 'checked' | 'help' | 'usage-error' | 'internal-error';
+
+/**
  * The structured outcome of one CLI invocation. The exit code keeps its
  * documented meaning, and `diagnostics` holds every broken-link finding in the
  * checker's existing order. A clean, help, usage-error or internal-error run
@@ -62,11 +71,17 @@ export interface ActionSummary {
  * `summary` carries the checker's authoritative counts for a completed check,
  * including a broken one. It is `null` when no checking run completed (help,
  * usage error or internal failure), so no caller can publish invented counts.
+ *
+ * `outcome` is the additive classification of the same invocation. The action
+ * uses it to decide whether a completed-check summary or the usage-error
+ * summary applies; it is never derived from printed output, and it does not
+ * replace the authoritative exit code.
  */
 export interface RunResult {
   readonly exitCode: 0 | 1 | 2;
   readonly diagnostics: readonly BrokenLinkResult[];
   readonly summary: ActionSummary | null;
+  readonly outcome: RunOutcome;
 }
 
 /** Shared empty finding list for runs that did not check any links. */
@@ -144,7 +159,12 @@ export async function run(
 
   if (parsed.help) {
     io.writeOut(HELP);
-    return { exitCode: 0, diagnostics: NO_DIAGNOSTICS, summary: null };
+    return {
+      exitCode: 0,
+      diagnostics: NO_DIAGNOSTICS,
+      summary: null,
+      outcome: 'help',
+    };
   }
 
   if (parsed.error !== null) {
@@ -152,6 +172,7 @@ export async function run(
       exitCode: reportUsageError(parsed.error, parsed.json, parsed.external, io),
       diagnostics: NO_DIAGNOSTICS,
       summary: null,
+      outcome: 'usage-error',
     };
   }
 
@@ -167,12 +188,14 @@ export async function run(
         exitCode: reportUsageError(error.message, parsed.json, parsed.external, io),
         diagnostics: NO_DIAGNOSTICS,
         summary: null,
+        outcome: 'usage-error',
       };
     }
     return {
       exitCode: reportInternalError(error, parsed.json, parsed.external, io),
       diagnostics: NO_DIAGNOSTICS,
       summary: null,
+      outcome: 'internal-error',
     };
   }
 
@@ -182,14 +205,14 @@ export async function run(
 
   if (parsed.json) {
     io.writeOut(formatJson(result, exitCode));
-    return { exitCode, diagnostics, summary };
+    return { exitCode, diagnostics, summary, outcome: 'checked' };
   }
 
   for (const diagnostic of result.diagnostics) {
     io.writeOut(`${formatDiagnostic(diagnostic)}\n`);
   }
   io.writeOut(formatSummary(result));
-  return { exitCode, diagnostics, summary };
+  return { exitCode, diagnostics, summary, outcome: 'checked' };
 }
 
 /**

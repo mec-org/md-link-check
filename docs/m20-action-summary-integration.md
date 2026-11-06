@@ -7,6 +7,12 @@ completed check, the action appends exactly one M19-formatted job summary to the
 file the runner names in `GITHUB_STEP_SUMMARY`. The direct CLI, the annotations,
 the action outputs and every exit code keep their existing bytes and meaning.
 
+> **M21 supersedes this milestone's unavailable-destination policy.** An unset,
+> empty or unwritable destination no longer stays silent or fails through the
+> internal-error path: it emits exactly one warning and preserves the
+> completed result. A usage error now appends the fixed zero-diagnostic usage
+> summary. See `docs/m21-exit-usage-write-failure.md` for the current contract.
+
 ## Integration point
 
 The only production integration edge is `runAction` in `src/action-runner.ts`,
@@ -82,35 +88,17 @@ Consequences, frozen by tests:
   unchanged and the heading immediately follows those bytes. M20 never rewrites
   pre-existing content to add a newline.
 
-## Unusable destination policy
+## Unusable destination policy (superseded by M21)
 
-The repository precedent is the M13 `GITHUB_OUTPUT` publisher
-(`src/action-outputs.ts`) and its M14 tests: an action-owned environment-file
-write failure is **fatal through the entrypoint's established internal-error
-path**. It is not a broken-link result, not a warning-only skip and not silently
-swallowed.
-
-M20 follows the same policy for the summary append:
-
-- `appendFile` errors propagate out of `runAction` unchanged;
-- the action entrypoint writes `md-link-check: internal error: <message>` to
-  stderr, with no stack trace and no `::error`/`::warning` workflow command;
-- the process exits `2`, replacing the completed check's `0`/`1`;
-- the CLI stdout, the annotations and the three action outputs were already
-  written before the summary append, so they remain complete and unchanged;
-- no partial summary is written: the formatter produces the whole fragment
-  before the single append starts.
-
-The append is the last action publication, after annotations and outputs, so a
-summary failure cannot suppress the existing surfaces and the existing surfaces
-finish in their established order.
-
-Because an absent or empty destination is already handled as "unavailable", the
-failure policy covers only a destination the runner supplied but the process
-cannot append to. Tests use a path whose parent directory is missing (a
-deterministic Node `ENOENT`) and compare the reported error with the exact
-`appendFile` message for that path, avoiding platform-dependent permission
-tests.
+M20 originally followed the M13 `GITHUB_OUTPUT` precedent and made an
+unwritable summary destination fatal through the entrypoint's internal-error
+path. M21 supersedes that policy: summary handling is secondary, an unset or
+empty destination emits one warning without any filesystem access, and an
+unwritable destination emits one warning and keeps the completed check's
+`0`/`1` (or usage error's `2`). The append classification lives in
+`src/action-step-summary.ts`; the warning and the final publication live in
+`src/action-runner.ts`. See `docs/m21-exit-usage-write-failure.md` for the
+current exact messages, placement and tests.
 
 ## Unchanged surfaces
 

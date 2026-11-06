@@ -11,6 +11,7 @@ import { relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runAction } from '../src/action-runner.js';
 import type { BrokenLinkResult, CliIo, RunResult } from '../src/run.js';
+import { withDefaultStepSummary } from './action-helpers.js';
 import { makeTempRoot } from './helpers.js';
 import { stageFixture } from './m16-helpers.js';
 import { M17_EXIT_CODE, M17_FINDINGS, M17_SUMMARY } from './m17-helpers.js';
@@ -36,7 +37,7 @@ async function invokeStructured(): Promise<StructuredInvocation> {
     },
   };
   const result = await runAction(
-    { INPUT_PATHS: fixture, INPUT_EXTERNAL: 'false' },
+    withDefaultStepSummary({ INPUT_PATHS: fixture, INPUT_EXTERNAL: 'false' }),
     io,
   );
   return { fixture, result, stdoutWrites, stderrWrites };
@@ -113,7 +114,15 @@ describe('M17 structured run-summary contract', () => {
   it('carries the counts and the findings in one result object', async () => {
     const { result } = await invokeStructured();
 
-    expect(Object.keys(result).sort()).toEqual(['diagnostics', 'exitCode', 'summary']);
+    // M21 adds the outcome classification alongside the counts and findings;
+    // it is one result object, not a second parallel summary model.
+    expect(Object.keys(result).sort()).toEqual([
+      'diagnostics',
+      'exitCode',
+      'outcome',
+      'summary',
+    ]);
+    expect(result.outcome).toBe('checked');
     expect(result.summary?.broken).toBe(result.diagnostics.length);
     expect(result.summary).toEqual(M17_SUMMARY);
   });

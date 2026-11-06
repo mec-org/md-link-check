@@ -9,10 +9,15 @@
  * {@link SUMMARY_DIAGNOSTIC_LIMIT} findings into deterministic Markdown and
  * passes every file, target and reason through the M18 escaper.
  *
- * Neither export is connected to the GitHub Action, to `src/action-runner.ts`
- * or to the CLI, and neither writes a job summary or performs any I/O. The
- * module reads no environment and has no runtime imports: the M17 contract
- * types are imported with `import type` and are erased at compile time.
+ * M21 adds {@link formatUsageErrorSummaryMarkdown}, a separate, narrowly scoped
+ * formatter for an action run whose inputs were rejected. It never fabricates
+ * counts for a check that did not happen and lists no broken-link diagnostic.
+ *
+ * No export is connected to the CLI, and none writes a job summary or performs
+ * any I/O by itself: the action integration point calls the formatters and the
+ * append helper. The module reads no environment and has no runtime imports:
+ * the M17 contract types are imported with `import type` and are erased at
+ * compile time.
  *
  * Encoding table (one code point in, its output; generated encodings are never
  * re-escaped):
@@ -335,4 +340,33 @@ export function formatRunSummaryMarkdown(
   }
 
   return `${lines.join('\n')}\n`;
+}
+
+/**
+ * Formats the Markdown step summary for an action run whose arguments or action
+ * inputs were rejected before any link check started.
+ *
+ * The output is a fragment, not a complete file, and always ends with exactly
+ * one newline. It has this exact grammar:
+ *
+ * ```text
+ * ## Results
+ *
+ * - Outcome: usage error
+ * - Link check: not performed
+ * ```
+ *
+ * The fragment deliberately contains no `## Diagnostics` section, so it lists
+ * zero broken-link entries. It does not render `filesChecked`, `broken` or
+ * `externalSkipped`: those counts describe a completed check and are not
+ * defined for a run that never started, and inventing zeros would claim a
+ * check the action did not perform. It also does not copy the usage message
+ * into the summary; the established usage diagnostic already carries it
+ * unchanged on standard error.
+ *
+ * The function is pure: it performs no I/O, reads no environment, has no
+ * runtime imports and takes no arguments.
+ */
+export function formatUsageErrorSummaryMarkdown(): string {
+  return '## Results\n\n- Outcome: usage error\n- Link check: not performed\n';
 }

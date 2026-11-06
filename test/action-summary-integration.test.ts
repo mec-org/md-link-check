@@ -15,7 +15,6 @@
  * authentic M17 result through the guarded M19 formatter unchanged.
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runAction as runSourceAction, writeStepSummary } from '../src/action-runner.js';
@@ -111,6 +110,28 @@ const BROKEN_SUMMARY = [
 const BROKEN_OUTPUTS =
   'files-checked=2\nbroken=5\nexternal-skipped=2\n';
 
+/** The exact M21 warning line for an absent or empty destination. */
+const UNAVAILABLE_WARNING =
+  '::warning::GITHUB_STEP_SUMMARY is not set; no job summary was written.\n';
+
+/** The exact M21 warning line for a destination that rejects the append. */
+const WRITE_FAILED_WARNING =
+  '::warning::GITHUB_STEP_SUMMARY could not be written; no job summary was written.\n';
+
+/** The exact M21 usage-error summary fragment, including its final newline. */
+const USAGE_SUMMARY = [
+  '## Results',
+  '',
+  '- Outcome: usage error',
+  '- Link check: not performed',
+  '',
+].join('\n');
+
+/** Exact complete warning lines in one captured stream. */
+function warningLines(text: string): string[] {
+  return text.split('\n').filter((line) => line.startsWith('::warning::'));
+}
+
 interface ArtifactInvocation {
   readonly result: ProcessResult;
   readonly outputPath: string;
@@ -130,10 +151,10 @@ async function invokeArtifact(
   writeFileSync(outputPath, '');
   const environment: Record<string, string | undefined> = {
     GITHUB_OUTPUT: outputPath,
+    // An explicit own property suppresses the shared test helper's writable
+    // default, so `null` really exercises the absent variable.
+    GITHUB_STEP_SUMMARY: summaryPath ?? undefined,
   };
-  if (summaryPath !== null) {
-    environment.GITHUB_STEP_SUMMARY = summaryPath;
-  }
 
   const result = await runAction({
     cwd: fixture,
@@ -141,16 +162,6 @@ async function invokeArtifact(
     env: environment,
   });
   return { result, outputPath };
-}
-
-/** The exact Node error message an append would produce at this destination. */
-async function appendErrorMessage(destination: string): Promise<string> {
-  try {
-    await appendFile(destination, 'probe', 'utf8');
-  } catch (error) {
-    return error instanceof Error ? error.message : String(error);
-  }
-  throw new Error('the destination was expected to be unusable');
 }
 
 /** Occurs exactly once when a summary was appended exactly once. */
@@ -244,26 +255,42 @@ describe('M20 action summary integration', () => {
     const root = makeTempRoot();
     const destination = join(root, 'step-summary.md');
     writeFileSync(destination, 'sentinel\n');
+    let stdout = '';
+    let stderr = '';
 
     await expect(
       writeStepSummary(
-        { filesChecked: 1, broken: 2, externalSkipped: 0 },
-        [
-          {
-            file: 'README.md',
-            line: 1,
-            target: 'missing.md',
-            reason: 'target does not exist',
-          },
-        ],
+        {
+          kind: 'completed',
+          summary: { filesChecked: 1, broken: 2, externalSkipped: 0 },
+          findings: [
+            {
+              file: 'README.md',
+              line: 1,
+              target: 'missing.md',
+              reason: 'target does not exist',
+            },
+          ],
+        },
         { GITHUB_STEP_SUMMARY: destination },
+        {
+          writeOut: (text) => {
+            stdout += text;
+          },
+          writeError: (text) => {
+            stderr += text;
+          },
+        },
       ),
     ).rejects.toThrow(
       'run summary counts and findings disagree: broken=2, findings=1',
     );
 
-    // The guard throws before the append, so no partial summary is written.
+    // The guard throws before the append, so no partial summary is written and
+    // the guard failure is not converted into a summary warning.
     expect(readFileSync(destination, 'utf8')).toBe('sentinel\n');
+    expect(stdout).toBe('');
+    expect(stderr).toBe('');
   });
 
   it('preserves existing summary bytes when appending', async () => {
@@ -294,7 +321,7 @@ describe('M20 action summary integration', () => {
     expect(readFileSync(noNewlinePath, 'utf8')).toBe(`sentinel${CLEAN_SUMMARY}`);
   });
 
-  it('does not write when GITHUB_STEP_SUMMARY is absent', async () => {
+  it('warns once and writes nothing when GITHUB_STEP_SUMMARY is absent', async () => {
     const root = makeTempRoot();
     const fixture = join(root, 'fixture');
     writeFiles(fixture, BROKEN_FIXTURE_FILES);
@@ -304,13 +331,20 @@ describe('M20 action summary integration', () => {
     writeFileSync(withDestinationPath, '');
     const withDestination = await invokeArtifact(root, fixture, withDestinationPath);
 
-    // Otherwise identical action behavior: no output, exit or value changes.
+    // The completed check's own bytes, outputs and exit stay unchanged; the
+    // only added byte is the exact M21 unavailable-destination warning, once.
     expect(absent.result.timedOut).toBe(false);
     expect(absent.result.status).toBe(1);
-    expect(absent.result.stdout).toBe(BROKEN_STDOUT);
+    expect(absent.result.stdout).toBe(`${BROKEN_STDOUT}${UNAVAILABLE_WARNING}`);
+    expect(warningLines(absent.result.stdout)).toEqual([
+      UNAVAILABLE_WARNING.slice(0, -1),
+    ]);
     expect(absent.result.stderr).toBe('');
     expect(readFileSync(absent.outputPath, 'utf8')).toBe(BROKEN_OUTPUTS);
-    expect(withDestination.result.stdout).toBe(absent.result.stdout);
+
+    // A usable destination differs only by appending that one summary.
+    expect(warningLines(withDestination.result.stdout)).toEqual([]);
+    expect(readFileSync(withDestinationPath, 'utf8')).toBe(BROKEN_SUMMARY);
     expect(withDestination.result.stderr).toBe(absent.result.stderr);
     expect(withDestination.result.status).toBe(absent.result.status);
     expect(readFileSync(withDestination.outputPath, 'utf8')).toBe(
@@ -318,7 +352,7 @@ describe('M20 action summary integration', () => {
     );
   });
 
-  it('does not write when GITHUB_STEP_SUMMARY is empty', async () => {
+  it('warns once and writes nothing when GITHUB_STEP_SUMMARY is empty', async () => {
     const root = makeTempRoot();
     const fixture = join(root, 'fixture');
     writeFiles(fixture, BROKEN_FIXTURE_FILES);
@@ -326,9 +360,11 @@ describe('M20 action summary integration', () => {
     const empty = await invokeArtifact(root, fixture, '');
     const absent = await invokeArtifact(root, fixture, null);
 
+    // The empty string is unavailable exactly like an unset variable: no
+    // filesystem access is attempted and the same single warning is emitted.
     expect(empty.result.timedOut).toBe(false);
     expect(empty.result.status).toBe(1);
-    expect(empty.result.stdout).toBe(BROKEN_STDOUT);
+    expect(empty.result.stdout).toBe(`${BROKEN_STDOUT}${UNAVAILABLE_WARNING}`);
     expect(empty.result.stderr).toBe('');
     expect(readFileSync(empty.outputPath, 'utf8')).toBe(BROKEN_OUTPUTS);
     expect(empty.result.stdout).toBe(absent.result.stdout);
@@ -336,48 +372,44 @@ describe('M20 action summary integration', () => {
     expect(empty.result.status).toBe(absent.result.status);
   });
 
-  it('handles an unusable summary destination under the established action I/O policy', async () => {
+  it('keeps the completed result and warns once when the destination is unusable', async () => {
     const root = makeTempRoot();
     const fixture = join(root, 'fixture');
     writeFiles(fixture, BROKEN_FIXTURE_FILES);
     const unusable = join(root, 'missing-parent', 'step-summary.md');
-    const expectedError = await appendErrorMessage(unusable);
 
     const { result, outputPath } = await invokeArtifact(root, fixture, unusable);
 
-    // The completed check's own surfaces are already complete: the unchanged
-    // CLI output and annotations, the three published outputs, and no warning.
+    // The underlying broken result is untouched: exit 1, not the internal-error
+    // exit 2, and every established surface keeps its bytes.
     expect(result.timedOut).toBe(false);
-    expect(result.status).toBe(2);
-    expect(result.stdout).toBe(BROKEN_STDOUT);
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe(`${BROKEN_STDOUT}${WRITE_FAILED_WARNING}`);
+    expect(warningLines(result.stdout)).toEqual([WRITE_FAILED_WARNING.slice(0, -1)]);
+    expect(result.stderr).toBe('');
     expect(readFileSync(outputPath, 'utf8')).toBe(BROKEN_OUTPUTS);
-    expect(result.stderr).not.toContain('::warning');
-    expect(result.stderr).not.toContain('::error');
 
-    // The append failure reaches the action entrypoint's existing internal-error
-    // path, exactly like an output-file failure: reported once, no stack trace,
-    // and never turned into a broken-link finding.
-    expect(result.stderr).toBe(
-      `md-link-check: internal error: ${expectedError}\n`,
-    );
+    // The write error is classified once at the summary boundary: no internal
+    // error, no stack trace, no second failure and no warning on stderr.
+    expect(result.stderr).not.toContain('internal error');
     expect(result.stderr).not.toMatch(/^\s+at /m);
+    expect(result.stderr).not.toContain('::warning');
     expect(existsSync(unusable)).toBe(false);
   });
 
-  it('writes no summary when no completed check produced a result', async () => {
+  it('writes one usage summary and no normal counts when no check completed', async () => {
     const root = makeTempRoot();
     const fixture = join(root, 'fixture');
     writeFiles(fixture, CLEAN_FIXTURE_FILES);
-    const summaryPath = join(root, 'step-summary.md');
-    writeFileSync(summaryPath, '');
     const outputPath = join(root, 'github-output.txt');
     writeFileSync(outputPath, '');
 
+    const inputFailurePath = join(root, 'input-failure-summary.md');
     const inputFailure = await runAction({
       cwd: fixture,
       inputs: { INPUT_PATHS: '.', INPUT_EXTERNAL: 'maybe' },
       env: {
-        GITHUB_STEP_SUMMARY: summaryPath,
+        GITHUB_STEP_SUMMARY: inputFailurePath,
         GITHUB_OUTPUT: outputPath,
       },
     });
@@ -386,20 +418,24 @@ describe('M20 action summary integration', () => {
     expect(inputFailure.stderr).toContain(
       'invalid action input "external": expected "true" or "false"',
     );
-    expect(readFileSync(summaryPath, 'utf8')).toBe('');
+    // A usage error gets exactly the fixed zero-diagnostic usage fragment and
+    // never invents normal-run counts or output records.
+    expect(readFileSync(inputFailurePath, 'utf8')).toBe(USAGE_SUMMARY);
     expect(readFileSync(outputPath, 'utf8')).toBe('');
 
+    const discoveryFailurePath = join(root, 'discovery-failure-summary.md');
     const discoveryFailure = await runAction({
       cwd: fixture,
       inputs: { INPUT_PATHS: 'does-not-exist.md' },
       env: {
-        GITHUB_STEP_SUMMARY: summaryPath,
+        GITHUB_STEP_SUMMARY: discoveryFailurePath,
         GITHUB_OUTPUT: outputPath,
       },
     });
     expect(discoveryFailure.status).toBe(2);
+    expect(discoveryFailure.stdout).toBe('');
     expect(discoveryFailure.stderr).toContain('cannot access input path');
-    expect(readFileSync(summaryPath, 'utf8')).toBe('');
+    expect(readFileSync(discoveryFailurePath, 'utf8')).toBe(USAGE_SUMMARY);
     expect(readFileSync(outputPath, 'utf8')).toBe('');
   });
 

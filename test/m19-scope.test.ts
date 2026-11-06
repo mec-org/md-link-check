@@ -14,11 +14,13 @@
  *   only it may read the `GITHUB_STEP_SUMMARY` destination;
  * - the formatter module itself stays pure, and the one append helper stays
  *   formatter-free;
- * - the committed action bundle contains the M20 integration and is no longer
- *   the pre-summary v0.3 bundle recorded by the M17 fixture manifest. Bundle
- *   freshness and byte reproducibility remain covered by the established
- *   `test/m15-committed-artifact.test.ts` and `test/m16-artifact-scope.test.ts`
- *   checks; this guard does not add a competing build mechanism.
+ * - the committed action bundle contains the M20 integration and is frozen to
+ *   an exact recorded SHA-256, just as the M19 guard froze the pre-summary v0.3
+ *   bundle, so any unexpected bundle change fails here. The in-packet
+ *   `action-dist/index.cjs is current` test and the established
+ *   `test/m15-committed-artifact.test.ts` / `test/m16-artifact-scope.test.ts`
+ *   checks prove the same bundle is a fresh build of current source; this guard
+ *   adds no competing build mechanism.
  */
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -32,13 +34,17 @@ const INTEGRATION_MODULE = join(SOURCE_DIR, 'action-runner.ts');
 const FORMATTER_MODULE = join(SOURCE_DIR, 'summary-markdown.ts');
 const STEP_SUMMARY_MODULE = join(SOURCE_DIR, 'action-step-summary.ts');
 const ACTION_BUNDLE = join(REPO_ROOT, 'action-dist', 'index.cjs');
-const M17_MANIFEST = join(
-  REPO_ROOT,
-  'test',
-  'fixtures',
-  'm17-v03',
-  'manifest.json',
-);
+
+/**
+ * SHA-256 of the reviewed M20 action bundle. The M19 guard froze the exact
+ * pre-summary v0.3 bundle by comparing against the M17 fixture manifest; M20
+ * intentionally changes the bundle, so it records the exact M20 bytes instead
+ * of replacing the equality check with a "differs from v0.3" check. Any
+ * unexpected bundle change fails this guard; the next milestone that
+ * deliberately regenerates the bundle revises this constant in the same PR.
+ */
+const M20_ACTION_BUNDLE_SHA256 =
+  'b1221582b18b38ee207ae0d633ab06077e1cb95373910ab846d145743e78a95e';
 
 /** Every TypeScript source file under `src/`, in deterministic path order. */
 function productionSources(): string[] {
@@ -122,16 +128,10 @@ describe('M20 action-summary integration scope', () => {
     expect(bundle).toContain('GITHUB_STEP_SUMMARY');
   });
 
-  it('regenerates the action bundle past the pre-summary v0.3 bundle', () => {
-    const manifest = JSON.parse(readFileSync(M17_MANIFEST, 'utf8')) as {
-      source?: { actionBundleSha256?: string };
-    };
-    const preSummarySha256 = manifest.source?.actionBundleSha256;
-    expect(typeof preSummarySha256).toBe('string');
-
+  it('keeps the committed M20 action bundle byte-identical to the reviewed bundle', () => {
     const actualSha256 = createHash('sha256')
       .update(readFileSync(ACTION_BUNDLE))
       .digest('hex');
-    expect(actualSha256).not.toBe(preSummarySha256);
+    expect(actualSha256).toBe(M20_ACTION_BUNDLE_SHA256);
   });
 });

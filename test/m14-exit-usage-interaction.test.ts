@@ -124,6 +124,13 @@ const USAGE_TEXT = [
 /** The authorized M14 base commit from the milestone packet. */
 const M14_BASE_SHA = 'be1c58084966d8003a48d687b028451c0a7c7b03';
 
+/**
+ * The charter files change only in an owner-approved charter PR (the v0.4 charter, #44), never in a milestone: the v0.4
+ * definition of done (item 9) forbids it, and the factory's merge gate treats both as tier 3, which only the owner merges.
+ * Every other protected path below stays frozen against the base.
+ */
+const CHARTER_FILES: readonly string[] = ['PROJECT.md', 'ROADMAP.md'];
+
 /** The committed M14 plan record that restates the plan criteria. */
 const M14_PLAN_PATH = join(REPO_ROOT, 'docs', 'm14-plan.md');
 
@@ -2125,13 +2132,6 @@ describe('M14 scope and compatibility', () => {
         'docs/m14-plan.md',
         'action-dist/index.cjs',
         'README.md',
-        // The owner-approved v0.4 charter (#44, 2093d17) edited these between
-        // M14 and M20. The M16 changed-path check already treats both as
-        // allowed charter files; listing them keeps this later-milestone
-        // re-check meaningful in a full checkout instead of failing on that
-        // pre-existing, authorized change. This revision changes neither file.
-        'PROJECT.md',
-        'ROADMAP.md',
         ...laterMilestonePaths,
       ]);
 
@@ -2140,6 +2140,9 @@ describe('M14 scope and compatibility', () => {
       expect(report.violations).toEqual([]);
       expect(report.changed.length).toBeGreaterThan(0);
       for (const path of report.changed) {
+        if (CHARTER_FILES.includes(path)) {
+          continue;
+        }
         expect(permitted.has(path), `unexpected changed path: ${path}`).toBe(true);
       }
     },

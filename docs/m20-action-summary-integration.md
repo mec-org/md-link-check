@@ -224,20 +224,39 @@ node scripts/check-scope.mjs   # no .github/ or .project/ change
 
 All M20 tests, the M18/M19 formatter suites, the M17 fixture provenance and
 surface suites, the M16 artifact/scope suites, the M14 permitted-path re-check
-and the M9–M15 action suites pass. This revision updates the M14 permitted-path
-allowlist for the two owner-approved v0.4 charter files that PR #44 changed
-before M20; M20 itself changes neither `PROJECT.md` nor `ROADMAP.md`, and no
-other path outside the M20 set is allowed.
+and the M9–M15 action suites pass in the repository's standard check
+environment: GitHub Actions `CI` (`.github/workflows/ci.yml`, `pull_request`
+trigger) runs `npm run typecheck` and `npm test` on a Linux shallow checkout,
+plus the repository's CodeQL workflow. The PR conversation records the exact
+check runs and their conclusions for the reviewed head.
 
-One environment-dependent local failure remains, and it also fails at the
-authorized base `02127a7`: `test/m16-artifact-scope.test.ts` requires that no
-`v0.3*` tag exists in the local checkout, while a full local clone carries the
-`v0.3.0` tag created for the M17 fixture provenance. The repository's CI
-checkout fetches no tags, so the test passes there. The PR conversation records
-the GitHub Actions results for the reviewed head: the `CI` workflow (typecheck
-and full `npm test`) and the CodeQL workflow completed successfully, and
-`npm run check:action` proves the committed bundle is current in the checkout
-that CI tests.
+The repository-standard environment is a shallow checkout; a full local
+checkout additionally has every live tag. That difference matters for two
+pre-existing tests:
+
+- `test/m14-exit-usage-interaction.test.ts` "M14 changes only permitted paths
+  relative to the authorized base" runs only when its authorized base
+  `be1c580` is present, so CI skips it and a full local checkout runs it. It
+  failed locally because the owner-approved v0.4 charter PR #44 changed
+  `PROJECT.md` and `ROADMAP.md` after M14's base. M20 does not change either
+  file and does not add them to the M14 permitted set: exactly those two files
+  are exempted through the same documented `CHARTER_FILES` constant that
+  `test/m16-artifact-scope.test.ts` already uses, citing #44 and the rule that
+  charter edits happen only in an owner-approved charter PR, never in a
+  milestone. Every other path outside the M20 set is still rejected.
+- `test/m16-artifact-scope.test.ts` "v0.3 creates no tag release or npm
+  publication" requires that no `v0.3*` tag exists in the local checkout. A
+  full local clone carries the `v0.3.0` tag created for the M17 fixture
+  provenance, while the CI checkout fetches no tags and the test passes there.
+  This failure is identical at the authorized base `02127a7` and is unrelated
+  to M20.
+
+Local totals at the reviewed head, full checkout with the M14 base commit and
+tags available (`npm test`): **1319 passed, 1 failed, 1320 total** — the one
+failure is the pre-existing M16 local-tag assertion above; the M14 re-check
+passes. The CI-equivalent shallow run and the live GitHub Actions check results
+for the reviewed head are pasted in the PR body, including the
+`action-dist/index.cjs is current` build check.
 
 ## Assumptions found false or resolved
 

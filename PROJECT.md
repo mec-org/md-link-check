@@ -1,6 +1,6 @@
 # md-link-check
 
-md-link-check is an offline CLI that finds broken relative links, images and heading anchors in a repository's Markdown. It is the software factory's pilot app: small, low-stakes, and checked against real docs. v0.1 is a CLI only, with no runtime dependencies; v0.2 adds HTML anchors and raw HTML links, opt-in external checks and a GitHub Action, still with no runtime dependencies. v0.3 adds CI-facing results to the GitHub Action: an annotation for each broken link and summary-count outputs, with the CLI unchanged.
+md-link-check is an offline CLI that finds broken relative links, images and heading anchors in a repository's Markdown. It is the software factory's pilot app: small, low-stakes, and checked against real docs. v0.1 is a CLI only, with no runtime dependencies; v0.2 adds HTML anchors and raw HTML links, opt-in external checks and a GitHub Action, still with no runtime dependencies. v0.3 adds CI-facing results to the GitHub Action: an annotation for each broken link and summary-count outputs, with the CLI unchanged. v0.4 adds a run summary to the GitHub Action's job page: the run's counts and the first broken links, with the CLI, the annotations and the outputs unchanged.
 
 Source PRD: [PRD.md](PRD.md)
 
@@ -51,6 +51,20 @@ v0.3 retains all v0.1 and v0.2 behavior and adds CI-facing results to the existi
 
 The default stays fully offline, tests use no real network (external-mode tests use a local HTTP server fixture only), and v0.3 adds no runtime dependency. Every source change regenerates the checked-in `action-dist/index.cjs` with the existing build script.
 
+## Scope (v0.4.0)
+
+v0.4 retains all v0.1, v0.2 and v0.3 behavior and adds one CI-facing record to the existing GitHub Action, and nothing else:
+
+- **A run summary:** when the action runs where GitHub Actions provides a job summary file (the `GITHUB_STEP_SUMMARY` environment variable), it appends one Markdown summary for the run. The summary shows the existing counts `summary.filesChecked`, `summary.broken` and `summary.externalSkipped`, then the broken-link diagnostics in the CLI's result order. At most the first 50 diagnostics are listed, then a line stating the total number of broken links and how many are not listed. The 50 is a documented constant.
+- **Safe values:** file names, targets and reasons are escaped, so characters that Markdown treats specially cannot change the summary's structure, add a link or a heading, or break a table or list. Each diagnostic stays exactly one entry.
+- **Fail safe:** a summary that cannot be written, because the variable is unset or the file is not writable, never changes the run's exit code, its printed output, its annotations or its outputs. A write failure is reported once, as one warning line.
+- **Everything else unchanged:**
+  - The action still prints the CLI's own output line for line, and emits the v0.3 annotations and outputs unchanged.
+  - Direct CLI runs write no summary.
+  - The `file:line: target — reason` diagnostic, exit codes 0, 1 and 2, the `--json` schema, the CLI options and the action's `paths` and `external` inputs and declared outputs are unchanged.
+
+The default stays fully offline, tests use no real network (external-mode tests use a local HTTP server fixture only), and v0.4 adds no runtime dependency. Every source change regenerates the checked-in `action-dist/index.cjs` with the existing build script.
+
 ## Non-goals
 
 - External URL checking unless `--external` is explicitly supplied.
@@ -66,6 +80,9 @@ The default stays fully offline, tests use no real network (external-mode tests 
 - New action inputs, an ignore or suppression mechanism, or new external transport, cache or retry controls (v0.3).
 - Wider Markdown or raw HTML parsing, such as block quotes, HTML comments, front matter, autolinks or multiline constructs (v0.3).
 - A v0.3 milestone that changes `package.json`, a lockfile, `scripts/`, `PROJECT.md` or `ROADMAP.md`.
+- A summary from direct CLI runs, new action inputs or outputs, or any change to the v0.3 annotations and outputs (v0.4).
+- An unbounded summary: more than the documented number of listed diagnostics (v0.4).
+- A v0.4 milestone that changes `package.json`, a lockfile, `scripts/`, `.github/`, `.project/`, `PROJECT.md` or `ROADMAP.md`.
 
 ## Canonical terminology
 
@@ -86,6 +103,7 @@ The default stays fully offline, tests use no real network (external-mode tests 
 - Whether and when to publish the package to npm remains an owner decision outside v0.2.
 - Whether and when to create the v0.2 release tag remains an owner decision after the definition of done is satisfied.
 - Whether and when to create the v0.3 release tag remains an owner decision after the v0.3 definition of done is satisfied.
+- Whether and when to create the v0.4 release tag remains an owner decision after the v0.4 definition of done is satisfied.
 
 ## Definition of done (v0.1)
 
@@ -123,3 +141,16 @@ When all four hold, the mission stops and the release decision goes to the owner
 8. Tests use no real network; external-mode tests use a local HTTP server fixture only; the default stays offline.
 9. No v0.3 milestone changes `package.json`, a lockfile, `scripts/`, `.github/`, `.project/`, `PROJECT.md` or `ROADMAP.md`; `action-dist/index.cjs` is current at every merge; CI is green on `main`.
 10. The README documents the annotations, the outputs and the unchanged CLI output, and its release-tag statements match the tags that exist; then the v0.3 release and tag decision is handed to the owner.
+
+## Definition of done (v0.4)
+
+1. M17–M23 are merged in order, one issue and one PR each, each within the factory's changed-line limit including `action-dist/index.cjs`.
+2. Action-level tests prove that exactly one run summary is appended for a clean run, a broken-link run and a usage-error run, with the counts equal to the run's `summary.filesChecked`, `summary.broken` and `summary.externalSkipped`.
+3. Tests prove the summary lists the broken-link diagnostics in the CLI's result order. With more than 50 broken links it lists the first 50 and states the total and the number not listed; with 50 or fewer it lists all of them.
+4. Tests cover file names, targets and reasons containing characters that Markdown treats specially; the summary's structure is unchanged and each diagnostic stays one entry with its values intact.
+5. Tests prove an unset or unwritable summary file changes neither the exit code, nor the printed output, nor the annotations, nor the outputs, and is reported once as a warning.
+6. For the covered fixtures, the action's printed output, annotations and outputs are byte-for-byte those of v0.3; direct CLI runs write no summary.
+7. Exit codes 0, 1 and 2, the CLI options, the `--json` fields and the action's inputs and declared outputs are unchanged, with and without `--external`.
+8. Tests use no real network; external-mode tests use a local HTTP server fixture only; the default stays offline.
+9. No v0.4 milestone changes `package.json`, a lockfile, `scripts/`, `.github/`, `.project/`, `PROJECT.md` or `ROADMAP.md`; `action-dist/index.cjs` is current at every merge; CI is green on `main`.
+10. The README documents the run summary, its listing limit and its fail-safe behavior, and its release-tag statements match the tags that exist; then the v0.4 release and tag decision is handed to the owner.

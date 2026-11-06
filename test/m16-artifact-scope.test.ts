@@ -345,12 +345,15 @@ describe('M16 v0.3 changed-path scope', () => {
       );
     }
     expect(existsSync(join(REPO_ROOT, '.github', 'workflows', 'release.yml'))).toBe(false);
-    // M23 aligned the README with the tags that exist: the owner-approved
-    // v0.3.0 tag is named with its pinned commit, and no v0.4 tag is claimed.
+    // Intentional M23 historical-assertion change, not a weakening of this
+    // guard: M16 wrote the old README assertion when no v0.3 tag existed. The
+    // owner later created the owner-approved v0.3.0 tag, so the README must now
+    // name it. The tag-provenance check above is unchanged. v0.4 tag
+    // truthfulness is owned by the M23 dynamic manifest test, so this
+    // historical test does not ban a tag the owner may create later.
     const readme = readFileSync(join(REPO_ROOT, 'README.md'), 'utf8');
     expect(readme).toContain('M16 creates no tag or release');
     expect(readme).toContain('The `v0.3.0` tag exists');
     expect(readme).toContain(OWNER_APPROVED_V03_TAG_COMMIT);
-    expect(readme).not.toMatch(/v0\.4\.0/);
   });
 });

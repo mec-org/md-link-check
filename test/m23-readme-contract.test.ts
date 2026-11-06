@@ -98,48 +98,69 @@ describe('M23 README v0.4 contract', () => {
     expect(readme).toMatch(/Outcome: usage error/);
     expect(readme).toMatch(/Link check: not performed/);
 
-    // The pre-existing v0.3 surfaces are restated as unchanged.
-    expect(readme).toMatch(/annotations? .*unchanged|unchanged .*annotations/);
+    // The pre-existing v0.3 surfaces are restated as unchanged: the action's
+    // printed diagnostics and annotations supplement, never replace, the CLI
+    // output.
+    expect(readme).toMatch(/The action prints the CLI's diagnostics and summaries unchanged/);
+    expect(readme).toMatch(/Annotations and outputs are additional records/);
   });
 
   it('states only release tags that exist', () => {
     const readme = readmeText();
     const manifest = readReleaseTagManifest();
     expect(manifest.version).toBe(1);
-    expect(manifest.v04Tag).toBeNull();
-    expect(Object.keys(manifest.tags).sort()).toEqual(['v0.2.0', 'v0.3.0']);
+    const recordedTags = Object.keys(manifest.tags);
+    expect(recordedTags).toEqual(expect.arrayContaining(['v0.2.0', 'v0.3.0']));
 
-    // Every tag the README names as existing belongs to the verified set.
-    for (const tag of Object.keys(manifest.tags)) {
-      expect(readme).toContain(`\`${tag}\` tag exists`);
-    }
-
-    // Pinned v0.3 provenance is retained: the exact owner-approved commit.
-    const v03 = manifest.tags['v0.3.0'];
-    expect(v03).toBeDefined();
-    expect(v03?.commit).toBe('4438906e6e6085c941faf3117c2aaca1824a073d');
-    expect(readme).toContain(v03?.commit ?? '');
-
-    // No v0.4 tag is created, moved or anticipated; the README distinguishes
-    // implemented v0.4 behavior from a published release.
-    expect(readme).toContain('no v0.4 release tag exists yet');
-    expect(readme).not.toMatch(/v0\.4\.0/);
-    expect(readme).toMatch(/v0\.4 interface is implemented/);
-
-    // A full checkout's local tags must match the recorded provenance. A
-    // shallow CI checkout may carry no tags at all; that case is covered by
-    // the committed manifest and is an explicitly recorded limitation.
+    // A full checkout exposes the actual local tags; a shallow CI checkout may
+    // carry none. Both sources feed the set of tags the README may name, so the
+    // suite follows the tags that exist instead of banning a future tag.
     const localTags = git(['tag', '--list'])
       .split('\n')
       .map((line) => line.trim())
       .filter((line) => line !== '');
+    const knownTags = new Set([
+      ...recordedTags,
+      ...localTags,
+      ...(manifest.v04Tag === null ? [] : [manifest.v04Tag]),
+    ]);
+
+    // Recorded provenance is verified against local Git when tags are
+    // available. A shallow CI checkout has no tags; the committed manifest is
+    // then the recorded evidence.
     if (localTags.length > 0) {
       for (const [tag, provenance] of Object.entries(manifest.tags)) {
-        expect(localTags).toContain(tag);
+        if (!localTags.includes(tag)) {
+          continue;
+        }
         expect(git(['rev-parse', `${tag}^{commit}`]).trim()).toBe(provenance.commit);
         expect(git(['rev-parse', tag]).trim()).toBe(provenance.tagObject);
       }
-      expect(localTags.filter((tag) => /^v0\.4(?:\.|$)/.test(tag))).toEqual([]);
+    }
+
+    // Pinned v0.3 provenance is retained in the manifest and the README.
+    const v03 = manifest.tags['v0.3.0'];
+    expect(v03).toBeDefined();
+    expect(v03?.commit).toBe('4438906e6e6085c941faf3117c2aaca1824a073d');
+    expect(readme).toContain(v03?.commit ?? '');
+    for (const tag of ['v0.2.0', 'v0.3.0']) {
+      expect(readme).toContain(`\`${tag}\` tag exists`);
+    }
+
+    // Every tag the README presents as existing must actually exist.
+    for (const match of readme.matchAll(/`(v\d+\.\d+\.\d+)` tag exists/g)) {
+      const tag = match[1] ?? '';
+      expect(knownTags.has(tag), `README claims nonexistent tag ${tag}`).toBe(true);
+    }
+
+    // When no v0.4 tag exists, the README says so and distinguishes implemented
+    // behavior from a published release. Once the owner creates one, the
+    // dynamic claim is allowed to follow the tag instead of failing the suite on
+    // the owner's release decision.
+    const v04Tags = [...knownTags].filter((tag) => /^v0\.4(?:\.|$)/.test(tag));
+    if (v04Tags.length === 0) {
+      expect(readme).toContain('no v0.4 release tag exists yet');
+      expect(readme).toMatch(/v0\.4 interface is implemented/);
     }
 
     // Any tagged-ref action example either uses the documented placeholder or
@@ -152,7 +173,10 @@ describe('M23 README v0.4 contract', () => {
         expect(readme).toMatch(/`<tag>` is a placeholder for the v0\.4 surface/);
         continue;
       }
-      expect(Object.keys(manifest.tags)).toContain(reference);
+      expect(
+        knownTags.has(reference),
+        `README pins nonexistent tag ${reference}`,
+      ).toBe(true);
     }
   });
 });

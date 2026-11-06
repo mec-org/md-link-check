@@ -177,12 +177,12 @@ describe('M16 README v0.3 contract', () => {
     expect(readme).toContain('The `v0.2.0` tag exists');
     expect(readme).toContain('The `v0.3.0` tag exists');
     expect(readme).not.toContain('no v0.3 release tag exists yet');
-    expect(readme).toContain('no v0.4 release tag exists yet');
     expect(readme).not.toContain('no release tag exists yet');
     // The v0.2.0 tag predates annotations and outputs, so it must not be
     // presented as the v0.3 action surface.
     expect(readme).toContain('The v0.2.0 tag does not contain the v0.3 annotations or outputs');
-    expect(readme).not.toMatch(/v0\.4\.0/);
+    // v0.4 tag truthfulness is owned by the M23 dynamic manifest test: this
+    // historical test does not ban a tag the owner may create later.
     for (const line of documentedUsesLines()) {
       expect(line).not.toMatch(/@v0\.2\.0$/);
     }
@@ -209,7 +209,7 @@ describe('M16 README v0.3 contract', () => {
 
   it('README retains release and tag decisions for the owner', () => {
     const readme = readmeText();
-    expect(readme).toContain('The v0.3 release and tag decisions remain the owner\'s');
+    expect(readme).toContain('The v0.3 release decision is complete');
     expect(readme).toContain('the release and tag decision remains the owner\'s');
     expect(readme).toContain('Create a v0.4 tag only after the owner\'s release decision');
     expect(readme).toContain('M16 creates no tag or release');

@@ -2103,6 +2103,9 @@ describe('M14 scope and compatibility', () => {
         'test/fixtures/m17-v03/manifest.json',
         'test/fixtures/m17-v03/special-annotations.txt',
         'docs/m17-run-summary-contract.md',
+        'src/summary-markdown.ts',
+        'test/summary-markdown.test.ts',
+        'docs/m18-summary-markdown.md',
       ]);
       const permitted = new Set([
         'test/m14-exit-usage-interaction.test.ts',

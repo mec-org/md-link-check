@@ -16,7 +16,7 @@
  *
  * ```
  * input             output
- * \                 \\
+ * \                 \\\\        (renders as \\)
  * `                 \`
  * |                 \|
  * *                 \*
@@ -27,23 +27,33 @@
  * >                 &gt;
  * &                 &amp;
  * #                 \#
+ * ~                 \~
+ * -                 \-
+ * +                 \+
+ * :                 \:
+ * www.              www\.       (dot escaped wherever it follows "www")
+ * 1. / 1) marker   1\. / 1\)   (only in a leading ordered-list marker)
  * LF                \n
  * CR                \r
  * TAB               \t
- * other C0 / DEL    \uXXXX   (lowercase four-digit hexadecimal)
+ * other C0 / DEL    \uXXXX      (lowercase four-digit hexadecimal)
  * anything else     unchanged
  * ```
  *
- * Every literal backslash is doubled, so input that already looks like an
- * escape (`\n`, `\u0000`) keeps its literal meaning in the escaped string and
- * is never confused with the encoding of the corresponding control character.
- * Every `#` is escaped, not only a leading one, so a value stays safe wherever
- * a future summary layout places it; the escaped text still renders as `#`.
- * Angle brackets use HTML entities, and `&` is escaped so an input such as
- * `&lt;` stays the four literal characters it was rather than becoming `<`.
+ * A literal backslash is written as four backslashes, which Markdown renders
+ * as two visible backslashes. That rendering is what makes a literal
+ * backslash sequence distinguishable from an encoded control: the literal
+ * input `\n` renders as `\\n` (two backslashes), while an actual LF renders as
+ * `\n` (one backslash). Merely doubling the source backslash would render both
+ * as `\n` and defeat the representation once the summary is rendered.
  *
- * The representation, its invariants and the bounded-expansion guarantee are
- * documented in `docs/m18-summary-markdown.md`.
+ * The extra `~`, `-`, `+`, `:`, `www.` and ordered-marker encodings neutralise
+ * the remaining GFM inline and block constructs that the packet's required set
+ * does not name: strikethrough (`~~`), extended autolinks (`http://`,
+ * `https://`, `www.`) and a value that starts a line with a list marker. They
+ * all render back as the original visible characters. The encoding table, the
+ * rendered-context guarantee and the bounded-expansion guarantee are documented
+ * in `docs/m18-summary-markdown.md`.
  */
 
 /**
@@ -64,7 +74,7 @@ export const SUMMARY_VALUE_MAX_EXPANSION = 6;
  * is emitted once, directly into the output, so no encoding is escaped again.
  */
 const CHARACTER_ENCODINGS = new Map<string, string>([
-  ['\\', '\\\\'],
+  ['\\', '\\\\\\\\'],
   ['`', '\\`'],
   ['|', '\\|'],
   ['*', '\\*'],
@@ -75,6 +85,10 @@ const CHARACTER_ENCODINGS = new Map<string, string>([
   ['>', '&gt;'],
   ['&', '&amp;'],
   ['#', '\\#'],
+  ['~', '\\~'],
+  ['-', '\\-'],
+  ['+', '\\+'],
+  [':', '\\:'],
   ['\n', '\\n'],
   ['\r', '\\r'],
   ['\t', '\\t'],
@@ -90,12 +104,24 @@ const CHARACTER_ENCODINGS = new Map<string, string>([
  * pairs) or by its documented visible encoding. The result contains no raw CR,
  * LF, TAB, C0 control or DEL character, so it is one physical line.
  *
+ * The escaped result is also safe after Markdown renders it: literal
+ * backslash text and encoded controls remain distinguishable, GFM
+ * strikethrough, the `http://`, `https://` and `www.` extended autolinks and a
+ * leading list marker cannot form, and every escape except the literal
+ * backslash renders back to the visible character it replaced (a literal
+ * backslash renders as two, by design). GFM can still auto-link a bare email
+ * address; preventing that would require changing the visible value, so it is
+ * documented as a limitation rather than handled.
+ *
  * The empty string maps to the empty string.
  */
 export function escapeSummaryValue(value: string): string {
+  const orderedMarkerIndex = orderedMarkerPunctuationIndex(value);
   let escaped = '';
+  let index = 0;
   for (const character of value) {
-    escaped += encodeCharacter(character);
+    escaped += encodeCharacter(character, value, index, orderedMarkerIndex);
+    index += character.length;
   }
   return escaped;
 }
@@ -105,10 +131,22 @@ export function escapeSummaryValue(value: string): string {
  * surrogate pairs intact; only ASCII Markdown punctuation and the covered
  * ASCII control characters are rewritten.
  */
-function encodeCharacter(character: string): string {
+function encodeCharacter(
+  character: string,
+  value: string,
+  index: number,
+  orderedMarkerIndex: number,
+): string {
   const encoding = CHARACTER_ENCODINGS.get(character);
   if (encoding !== undefined) {
     return encoding;
+  }
+
+  if (index === orderedMarkerIndex && (character === '.' || character === ')')) {
+    return `\\${character}`;
+  }
+  if (character === '.' && followsWww(value, index)) {
+    return '\\.';
   }
 
   const codePoint = character.codePointAt(0);
@@ -119,4 +157,30 @@ function encodeCharacter(character: string): string {
     return `\\u${codePoint.toString(16).padStart(4, '0')}`;
   }
   return character;
+}
+
+/**
+ * Index of the `.` or `)` in a leading ordered-list marker, or -1 when the
+ * value does not start with one. GFM allows up to three leading spaces and at
+ * most nine digits before the marker punctuation, which must be followed by
+ * whitespace or the end of the value.
+ */
+function orderedMarkerPunctuationIndex(value: string): number {
+  const match = /^ {0,3}[0-9]{1,9}[.)](?=\s|$)/.exec(value);
+  if (match === null) {
+    return -1;
+  }
+  return match[0].length - 1;
+}
+
+/**
+ * True for the dot of a `www.` prefix: escaping it stops GFM's extended
+ * autolink from turning the value into a link while rendering the same text.
+ * Escaping every dot after `www` (even inside a longer word) is harmless.
+ */
+function followsWww(value: string, dotIndex: number): boolean {
+  if (dotIndex < 3) {
+    return false;
+  }
+  return value.slice(dotIndex - 3, dotIndex).toLowerCase() === 'www';
 }

@@ -21,59 +21,91 @@ pairs and other non-ASCII text are never split or rewritten.
 
 ## Encoding rules
 
-One input code point produces one of these outputs. The input is scanned once
-and each encoding is written directly to the result, so a generated encoding is
-never escaped again.
+One input code point produces one output; the table shows both the escaped
+source and what a reader sees after GitHub renders the summary as GFM.
 
 ```text
-input             output
-\                 \\
-`                 \`
-|                 \|
-*                 \*
-_                 \_
-[                 \[
-]                 \]
-<                 &lt;
->                 &gt;
-&                 &amp;
-#                 \#
-LF                \n
-CR                \r
-TAB               \t
-other C0 / DEL    \uXXXX   (lowercase four-digit hexadecimal, e.g. \u0000, \u001f, \u007f)
-anything else     unchanged
+input               raw output     rendered text
+\                   \\\\           \\
+`                   \`             `
+|                   \|             |
+*                   \*             *
+_                   \_             _
+[                   \[             [
+]                   \]             ]
+<                   &lt;           <
+>                   &gt;           >
+&                   &amp;          &
+#                   \#             #
+~                   \~             ~
+-                   \-             -
++                   \+             +
+:                   \:             :
+www.                www\.          www.
+1. / 1) marker      1\. / 1\)      1. / 1)
+LF                  \n             \n   (two visible characters)
+CR                  \r             \r   (two visible characters)
+TAB                 \t             \t   (two visible characters)
+other C0 / DEL      \uXXXX         \uXXXX
+anything else       unchanged      unchanged
 ```
 
 Notes:
 
-- **Backslash disambiguation.** Every literal backslash is doubled. A literal
-  backslash followed by `n`, `r`, `t` or `u0000` therefore keeps its literal
-  meaning and is distinct in the escaped string from the encoding of the actual
-  control character: literal `\n` (two input characters) becomes `\\n` (three
-  output characters), while LF becomes `\n` (two output characters).
-- **Heading marker.** Every `#` is backslash-escaped, not only one in a leading
-  position, so the value stays safe wherever a future summary layout places it.
-  The escaped text still renders as `#`.
+- **Rendered backslash distinction.** A literal backslash is written as four
+  backslashes, which GFM renders as two visible backslashes. That is what keeps
+  literal escape-like text distinguishable from an encoded control *in the
+  rendered summary*: literal input `\n` renders as `\\n` (two backslashes and
+  `n`), while an actual LF renders as `\n` (one backslash and `n`). Doubling
+  only the source backslash would render both as `\n` and defeat the
+  representation. The same holds for `\r`, `\t` and `\u0000`.
+- **Strikethrough and emphasis.** `~` is escaped so `~~text~~` cannot become
+  strikethrough; `*` and `_` are escaped so they cannot emphasise. All three
+  render back as themselves.
+- **Extended autolinks.** `:` is escaped, which breaks the `http://` and
+  `https://` source patterns that GFM would auto-link, and the dot of `www.` is
+  escaped wherever it follows `www` (case-insensitively). Both render back as
+  the original visible text. GFM's bare-email autolink (see the limitation
+  below) cannot be prevented this way.
+- **Block structure.** The output has no raw line break, so a value cannot
+  introduce a new line, paragraph or table row. `>` becomes `&gt;`, `#` is
+  escaped anywhere, backticks and pipes are escaped, and `-`, `+` are escaped
+  so a value that starts a line cannot become a list item or thematic break.
+  An ordered-list marker at the start of the value (up to three leading spaces,
+  1–9 digits, then `.` or `)` and whitespace) has that punctuation escaped;
+  `1.2` and a marker away from the start are ordinary text.
 - **Angle brackets and ampersand.** `<` and `>` become `&lt;` and `&gt;`, so
   they cannot open raw HTML or an autolink. `&` becomes `&amp;`, so input such
   as `&lt;` stays the four literal characters it was instead of rendering as
   `<`; entity-like text cannot collide with an encoded bracket.
 - **Line breaks and controls.** LF, CR and TAB have the visible sequences
   above; U+0000–U+001F not covered by those and U+007F use the fixed-width
-  `\uXXXX` form. No raw line break or covered control remains, and the
-  representation is unambiguous.
+  `\uXXXX` form. No raw line break or covered control remains.
 - **Everything else** — ordinary text and all non-ASCII characters — is
   emitted unchanged. Nothing is deleted, trimmed, collapsed, reordered or
   truncated.
 - **Empty input** maps to the empty string.
+
+### Known limitation
+
+GitHub's GFM renderer turns a bare email address such as `user@example.com`
+into a `mailto:` link. Backslash-escaping the `@` or writing it as a character
+reference still renders `@`, and GitHub still auto-links the rendered text
+(checked against GitHub's Markdown API), so preventing that link would require
+changing the visible value, which M18 forbids. M18 therefore covers the
+required bracket links and the `http://`, `https://` and `www.` autolinks;
+bare-email links remain a documented limitation of rendering-driven GFM.
 
 ## Guarantees
 
 - **One physical line.** The output contains no raw CR, LF, TAB, C0 control or
   DEL character.
 - **Meaning and order.** Every input character remains represented, in order,
-  by itself or by its documented encoding.
+  by itself or by its documented encoding. Every escape except the literal
+  backslash renders back to the character it replaced; a literal backslash
+  renders as two visible backslashes so it stays distinguishable from the
+  control encodings, and controls render as visible sequences corresponding to
+  the original control characters.
 - **Deterministic.** The same input always produces the same output.
 - **Bounded.** Each input UTF-16 code unit produces at most
   `SUMMARY_VALUE_MAX_EXPANSION` (6) output UTF-16 code units, so
@@ -85,26 +117,33 @@ Notes:
 ## Tests
 
 `test/summary-markdown.test.ts` covers each required character class with
-literal expected strings:
+literal expected strings, plus an independent inline-text renderer that
+resolves backslash escapes and character references the way CommonMark does:
 
 1. `escapes Markdown structural punctuation` — backticks, pipes, asterisks,
    underscores, brackets and angle brackets;
 2. `escapes an ampersand so entity-like text stays literal`;
 3. `escapes a leading heading marker` — a leading `#` and a `#` away from the
    leading position;
-4. `encodes line breaks as visible text on one line` — LF, CR and CRLF;
-5. `encodes tabs and control characters without deletion` — TAB, U+0000, an
+4. `neutralises GFM strikethrough and extended autolinks` — `~~`, `http://`,
+   `https://`, `www.`, and the rendered-text check;
+5. `neutralises leading list and block markers` — `-`, `+`, `1.`, `1)`, three
+   leading spaces, thematic break, block quote, heading, and non-marker cases;
+6. `encodes line breaks as visible text on one line` — LF, CR and CRLF;
+7. `encodes tabs and control characters without deletion` — TAB, U+0000, an
    interior C0 control, U+001F and U+007F;
-6. `distinguishes literal escape-like text from encoded controls` — literal
-   `\n`, `\r`, `\t` and `\u0000` against the encoded controls;
-7. `preserves mixed value meaning in one escaped entry` — one representative
-   value with every special class and a CRLF, exact escaped string;
-8. `has bounded deterministic expansion` — the bound for every specially
-   encoded character, mixed and repeated worst-case input, identical repeat
-   calls;
-9. `preserves non-ASCII text unchanged`;
-10. `leaves ordinary values unchanged`;
-11. `handles the empty string`.
+8. `distinguishes literal escape-like text from encoded controls` — literal
+   `\`, `\n`, `\r`, `\t` and `\u0000` against the encoded controls, both raw
+   and rendered;
+9. `preserves mixed value meaning in one escaped entry` — one representative
+   value with every special class and a CRLF, exact escaped and rendered text;
+10. `has bounded deterministic expansion` — the bound for every specially
+    encoded character, mixed and repeated worst-case input, identical repeat
+    calls;
+11. `preserves non-ASCII text unchanged`;
+12. `leaves ordinary values unchanged`;
+13. `renders escaped punctuation back to the visible source text`;
+14. `handles the empty string`.
 
 ## Not connected to the action
 

@@ -275,6 +275,12 @@ export const SUMMARY_DIAGNOSTIC_LIMIT = 50;
  * findings the diagnostics section is omitted, so a clean run ends after the
  * three count lines.
  *
+ * The M17 contract defines `counts.broken` as that completed run's number of
+ * diagnostics, so the formatter requires `counts.broken === diagnostics.length`
+ * and throws a deterministic `Error` before formatting when they disagree. The
+ * rendered counts section and the omission disclosure therefore cannot
+ * contradict each other.
+ *
  * Every file, target and reason is passed through {@link escapeSummaryValue},
  * so each finding stays one inline Markdown entry. Values are escaped in full;
  * the formatter truncates neither a value nor a line number. The resulting
@@ -287,11 +293,19 @@ export const SUMMARY_DIAGNOSTIC_LIMIT = 50;
  * @param counts The M17 authoritative summary counts of the same completed run.
  * @param diagnostics The M17 ordered findings of that run; `counts.broken` is
  *   that run's number of diagnostics, so it equals `diagnostics.length`.
+ * @throws Error when `counts.broken` differs from `diagnostics.length`.
  */
 export function formatRunSummaryMarkdown(
   counts: ActionSummary,
   diagnostics: readonly BrokenLinkResult[],
 ): string {
+  if (counts.broken !== diagnostics.length) {
+    throw new Error(
+      'run summary counts and findings disagree: ' +
+        `broken=${counts.broken}, findings=${diagnostics.length}`,
+    );
+  }
+
   const total = diagnostics.length;
   const listed = diagnostics.slice(0, SUMMARY_DIAGNOSTIC_LIMIT);
   const lines = [

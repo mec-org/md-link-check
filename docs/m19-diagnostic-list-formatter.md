@@ -22,6 +22,10 @@ create a second result model or copy the count or finding shapes. The type-only
 import is erased at compile time, so the module has no runtime import, reads no
 environment, performs no I/O and adds no runtime dependency, as M18 required.
 
+The formatter throws a deterministic `Error` when `counts.broken` differs from
+`diagnostics.length`, so it cannot render a counts section and an omission
+disclosure that contradict each other.
+
 ## Exact Markdown grammar
 
 The formatter returns a Markdown fragment that always ends with exactly one
@@ -78,10 +82,12 @@ locale-independent.
 The M17 contract has both an authoritative `summary.broken` count and the
 ordered findings; `broken` is defined as the number of diagnostics and both are
 projected from the same completed run. The formatter renders the supplied
-`broken` count as supplied and derives the disclosure total from
-`diagnostics.length`, which is the M17 relationship. A test formats the M17
-oracle counts and findings together and asserts they agree, so the two cannot
-silently contradict each other in the production seam.
+`counts.broken` as supplied and derives the disclosure total from
+`diagnostics.length`. To keep those statements from ever contradicting each
+other, it checks `counts.broken === diagnostics.length` before formatting and
+throws a deterministic `Error`
+(`run summary counts and findings disagree: broken=<n>, findings=<n>`)
+otherwise. Tests cover the M17 oracle pair and a mismatch in each direction.
 
 ## Escaping
 
@@ -116,10 +122,29 @@ backticks, pipes, asterisks, underscores, brackets, angle brackets, a leading
    labels, punctuation, blank lines and exactly one final newline, called twice;
 9. `keeps the M17 broken count equal to the formatted diagnostics total` — the
    M17 oracle's `broken` and finding count agree and are rendered consistently;
-10. `does not truncate an individual diagnostic value` — a long reason is
+10. `rejects counts whose broken total disagrees with the findings` — a broken
+    count below and above the finding total each throw the deterministic error,
+    while the matching pair still formats;
+11. `does not truncate an individual diagnostic value` — a long reason is
     rendered in full.
 
-M18 escaping is unchanged: `test/summary-markdown.test.ts` still passes.
+`test/m19-scope.test.ts` runs without git history and guards the M19 scope in
+CI:
+
+- no other module under `src/` imports or mentions the formatter module or its
+  exports, so no action or CLI path can reach it;
+- the committed `action-dist/index.cjs` contains no M19 surface and is
+  byte-identical to the pre-summary v0.3 bundle recorded in
+  `test/fixtures/m17-v03/manifest.json`.
+
+The M14 permitted-path check remains the full-checkout changed-path guard; it
+is skipped in a shallow CI checkout because its authorized M14 base commit is
+unavailable. The scope checks above do not depend on git history.
+
+M19 does not modify the M18 escaping implementation or any CLI or action
+module. The M18 and M17 suites are outside the M19 packet, so this document does
+not claim their results; `test/m19-scope.test.ts` proves the formatter is not
+reachable from the action or CLI.
 
 ## Deliberately absent
 

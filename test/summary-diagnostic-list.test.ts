@@ -350,6 +350,28 @@ describe('M19 diagnostic list formatter', () => {
     expect(markdown).not.toMatch(/not listed|total diagnostics/);
   });
 
+  it('rejects counts whose broken total disagrees with the findings', () => {
+    const findings = simpleFindings(51);
+
+    // The M17 contract defines `broken` as the number of diagnostics, so a
+    // mismatched pair fails before any contradictory Markdown is built.
+    expect(() =>
+      formatRunSummaryMarkdown(countsOf({ broken: 3 }), findings),
+    ).toThrow(
+      'run summary counts and findings disagree: broken=3, findings=51',
+    );
+    expect(() =>
+      formatRunSummaryMarkdown(countsOf({ broken: 2 }), [simpleFinding(0)]),
+    ).toThrow(
+      'run summary counts and findings disagree: broken=2, findings=1',
+    );
+
+    // Matching counts still format, including the M17 oracle pair above.
+    expect(
+      formatRunSummaryMarkdown(countsOf({ broken: 51 }), findings),
+    ).toContain('- Broken: 51');
+  });
+
   it('does not truncate an individual diagnostic value', () => {
     const longReason = 'reason '.repeat(1_000).trim();
     const finding: BrokenLinkResult = {

@@ -5,8 +5,8 @@
 - Authorized base: `4c821d201072b3fe00ebd053605e95cf7d5e8a93`
 - Starting `HEAD`: `4c821d201072b3fe00ebd053605e95cf7d5e8a93` (clean isolated worktree)
 - Branch: `agent/hardening-docs-v3-17e95c4a4507`
-- Final commit: the reviewed pull-request head; the artifacts and tests below were verified at that head.
-- Pull request: `<PR URL>`
+- Final commit: the head of PR #43 (see the pull request for the exact SHA); the artifacts, gates and acceptance evidence were verified at that head.
+- Pull request: [#43](https://github.com/mec-org/md-link-check/pull/43)
 - Environment: Node.js `v22.23.4`, npm `10.9.9`, Linux, offline acceptance runs
 
 This report keeps the engineering evidence for M16. Machine-specific worktree and

@@ -136,11 +136,14 @@ M20 updates only the precise integration edge:
   mention the M19 formatter and `GITHUB_STEP_SUMMARY`;
 - `src/summary-markdown.ts` stays pure and imports no filesystem or environment;
 - `src/action-step-summary.ts` stays formatter-free;
-- the committed bundle contains the M20 integration and is no longer the
-  pre-summary v0.3 bundle. Bundle freshness and byte reproducibility stay with
-  the established `test/m15-committed-artifact.test.ts` and
-  `test/m16-artifact-scope.test.ts` checks; no competing build mechanism is
-  added.
+- the committed bundle contains the M20 integration, so the shipped artifact
+  actually carries the formatter and the append path. Bundle freshness is proven
+  positively, without a hand-maintained generated hash: the in-packet
+  `action-dist/index.cjs is current` test runs the existing
+  `scripts/build-action.mjs --check`, and the established
+  `test/m15-committed-artifact.test.ts` and
+  `test/m16-artifact-scope.test.ts` checks remain. No competing build mechanism
+  is added.
 
 The M9 and M17 suites contained the old absence assertions ("writes no step
 summary") because those milestones predate the summary. M20 is the milestone
@@ -199,6 +202,25 @@ build script's `--check` mode; `test/m15-committed-artifact.test.ts` and
 `test/m16-artifact-scope.test.ts` keep their established freshness and
 reproducibility coverage, so M20 adds no competing build mechanism.
 
+Files updated for the integration, listed here rather than only in the PR:
+
+- `test/action-helpers.ts`, `test/m15-helpers.ts` and
+  `test/m12-action-annotations.test.ts`: action children started by these
+  helpers and tests now delete the host `GITHUB_STEP_SUMMARY` (as they already
+  did for `GITHUB_OUTPUT`), so the suite never appends to a runner's own
+  job-summary file while the M20 tests opt in explicitly with temporary paths.
+- `test/m14-exit-usage-interaction.test.ts`: adds only the M20 paths to the
+  later-milestone allowlist, exactly as earlier milestones did. It does not
+  exempt, skip or widen any pre-existing path; the pre-existing full-checkout
+  charter-file failure described under Verification remains outside M20 and is
+  not hidden by this PR.
+- `test/m17-v03-surface-regression.test.ts` and
+  `test/m9-action-result.test.ts`: the superseded "writes no step summary"
+  absence assertions now prove the summary is appended while every frozen
+  M9/M17 structured-result and surface byte stays unchanged.
+- `test/m19-scope.test.ts`: the M19 guard is narrowed to the single permitted
+  integration edge and its bundle assertions, as described under Scope guard.
+
 ## Bundle regeneration
 
 ```bash
@@ -223,27 +245,26 @@ node scripts/check-scope.mjs   # no .github/ or .project/ change
 ```
 
 All M20 tests, the M18/M19 formatter suites, the M17 fixture provenance and
-surface suites, the M16 artifact/scope suites, the M14 permitted-path re-check
-and the M9–M15 action suites pass in the repository's standard check
-environment: GitHub Actions `CI` (`.github/workflows/ci.yml`, `pull_request`
-trigger) runs `npm run typecheck` and `npm test` on a Linux shallow checkout,
-plus the repository's CodeQL workflow. The PR conversation records the exact
-check runs and their conclusions for the reviewed head.
+surface suites, the M16 artifact/scope suites and the M9–M15 action suites pass
+in the repository's standard check environment: GitHub Actions `CI`
+(`.github/workflows/ci.yml`, `pull_request` trigger: `npm run typecheck` and
+`npm test` on a Linux shallow checkout) plus the repository's CodeQL workflow.
+The live check runs and a locally reproduced CI-equivalent run are recorded in
+the CI-evidence section added by this review round's documentation-only commit
+and in the PR body.
 
-The repository-standard environment is a shallow checkout; a full local
-checkout additionally has every live tag. That difference matters for two
-pre-existing tests:
+The standard environment is a shallow checkout; a full local checkout
+additionally has every base commit and live tag. That difference exposes two
+pre-existing, environment-dependent failures that are outside M20:
 
 - `test/m14-exit-usage-interaction.test.ts` "M14 changes only permitted paths
   relative to the authorized base" runs only when its authorized base
   `be1c580` is present, so CI skips it and a full local checkout runs it. It
-  failed locally because the owner-approved v0.4 charter PR #44 changed
-  `PROJECT.md` and `ROADMAP.md` after M14's base. M20 does not change either
-  file and does not add them to the M14 permitted set: exactly those two files
-  are exempted through the same documented `CHARTER_FILES` constant that
-  `test/m16-artifact-scope.test.ts` already uses, citing #44 and the rule that
-  charter edits happen only in an owner-approved charter PR, never in a
-  milestone. Every other path outside the M20 set is still rejected.
+  fails because the owner-approved v0.4 charter PR #44 changed `PROJECT.md` and
+  `ROADMAP.md` after M14's base. M20 changes neither file and does not exempt,
+  skip or allowlist either path: those two files still fail the M14 permitted-
+  path check exactly as they did at the authorized base. Repairing that
+  pre-existing guard belongs to a separate, owner-approved change, not to M20.
 - `test/m16-artifact-scope.test.ts` "v0.3 creates no tag release or npm
   publication" requires that no `v0.3*` tag exists in the local checkout. A
   full local clone carries the `v0.3.0` tag created for the M17 fixture
@@ -251,12 +272,19 @@ pre-existing tests:
   This failure is identical at the authorized base `02127a7` and is unrelated
   to M20.
 
-Local totals at the reviewed head, full checkout with the M14 base commit and
-tags available (`npm test`): **1319 passed, 1 failed, 1320 total** — the one
-failure is the pre-existing M16 local-tag assertion above; the M14 re-check
-passes. The CI-equivalent shallow run and the live GitHub Actions check results
-for the reviewed head are pasted in the PR body, including the
-`action-dist/index.cjs is current` build check.
+Full local checkout at the reviewed head, with the M14 base commit and live
+tags available (`npm test`): **1317 passed, 2 failed, 1319 total**. The two
+failures are exactly the pre-existing M14 charter-file and M16 local-tag
+assertions above; M20 neither causes nor hides either one.
+
+Other checks: `npm run check:action` reports
+`action entrypoint is reproducible: action-dist/index.cjs`, and
+`node scripts/check-scope.mjs` reports no change under `.github/` or
+`.project/`.
+
+The live check runs and a locally reproduced CI-equivalent run are recorded in
+the CI-evidence section added by this review round's documentation-only commit
+(and in the PR body).
 
 ## Assumptions found false or resolved
 

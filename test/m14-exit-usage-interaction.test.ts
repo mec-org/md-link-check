@@ -2089,12 +2089,24 @@ describe('M14 scope and compatibility', () => {
         'test/fixtures/m16-multifile/docs/plan/notes.md',
         'test/fixtures/m16-multifile/images/logo.png',
         'docs/m16-acceptance.md',
+        'test/m17-helpers.ts',
+        'test/m17-run-summary-contract.test.ts',
+        'test/m17-v03-surface-regression.test.ts',
+        'test/fixtures/m17-v03/action-annotations.txt',
+        'test/fixtures/m17-v03/action-outputs.txt',
+        'test/fixtures/m17-v03/cli-json.stdout.txt',
+        'test/fixtures/m17-v03/cli-text.stdout.txt',
+        'docs/m17-run-summary-contract.md',
       ]);
       const permitted = new Set([
         'test/m14-exit-usage-interaction.test.ts',
         'docs/m14-plan.md',
         'action-dist/index.cjs',
         'README.md',
+        // The owner-approved v0.4 charter PR (#44) edited these project
+        // documents; they are not M14-era changes.
+        'PROJECT.md',
+        'ROADMAP.md',
         ...laterMilestonePaths,
       ]);
 

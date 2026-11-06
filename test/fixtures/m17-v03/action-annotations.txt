@@ -1,0 +1,16 @@
+::error file=README.md,line=3::docs/missing.md — target does not exist
+::error file=README.md,line=4::images/missing.png — target does not exist
+::error file=README.md,line=5::#missing-anchor — anchor does not exist
+::error file=README.md,line=6::docs/guide.md#deployment — anchor does not exist
+::error file=README.md,line=8::docs/missing-raw.md — target does not exist
+::error file=README.md,line=9::images/missing-raw.png — target does not exist
+::error file=README.md,line=10::docs/missing-ref.md — target does not exist
+::error file=README.md,line=18::#duplicate-2 — anchor does not exist
+::error file=docs/api.md,line=7::guide.md#installation-1 — anchor does not exist
+::error file=docs/api.md,line=8::#installation-1 — anchor does not exist
+::error file=docs/api.md,line=10::guide.md#not-a-heading — anchor does not exist
+::error file=docs/guide.md,line=7::../README.md#missing — anchor does not exist
+::error file=docs/guide.md,line=8::missing-api.md — target does not exist
+::error file=docs/guide.md,line=9::../images/missing-logo.png — target does not exist
+::error file=docs/plan/notes.md,line=5::../guide.md#plan-notes — anchor does not exist
+::error file=docs/plan/notes.md,line=6::../missing-plan.md — target does not exist

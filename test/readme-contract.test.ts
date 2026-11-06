@@ -318,8 +318,11 @@ describe('M8 README contract', () => {
     for (const line of usesLines) {
       expect(line).toMatch(/^(?:- )?uses: mec-org\/md-link-check@<[A-Za-z][A-Za-z0-9_-]*>$/);
     }
-    expect(readme).toContain('no release tag exists yet');
+    expect(readme).toContain('no v0.3 release tag exists yet');
+    expect(readme).toContain('`v0.2.0` tag exists');
+    expect(readme).toContain('M16 creates no tag or release');
     expect(readme).toContain('`<tag>` is a placeholder');
+    expect(readme).not.toContain('no release tag exists yet');
   });
 
   it('README does not claim npm publication', () => {

@@ -34,6 +34,9 @@
  * -                 \-
  * +                 \+
  * :                 \:
+ * =                 \=
+ * $                 \u0024      (visible code; see math note)
+ * 4+ leading spaces &#32; each  (renders as spaces)
  * www.              www\.       (dot escaped wherever it follows "www")
  * 1. / 1) marker   1\. / 1\)   (only in a leading ordered-list marker)
  * LF                \n
@@ -50,13 +53,25 @@
  * `\n` (one backslash). Merely doubling the source backslash would render both
  * as `\n` and defeat the representation once the summary is rendered.
  *
- * The extra `~`, `-`, `+`, `:`, `www.` and ordered-marker encodings neutralise
- * the remaining GFM inline and block constructs that the packet's required set
- * does not name: strikethrough (`~~`), extended autolinks (`http://`,
- * `https://`, `www.`) and a value that starts a line with a list marker. They
- * all render back as the original visible characters. The encoding table, the
- * rendered-context guarantee and the bounded-expansion guarantee are documented
- * in `docs/m18-summary-markdown.md`.
+ * The extra `~`, `-`, `+`, `:`, `=`, `www.` and ordered-marker encodings
+ * neutralise the remaining GFM inline and block constructs that the packet's
+ * required set does not name: strikethrough (`~~`), extended autolinks
+ * (`http://`, `https://`, `www.`), setext underlines (`===`) and a value that
+ * starts a line with a list marker. They all render back as the original
+ * visible characters. Four or more leading spaces are written as `&#32;`
+ * entities so a value that starts a line cannot become an indented code block;
+ * one to three leading spaces are left as spaces.
+ *
+ * `$` cannot be neutralised with a Markdown escape: GitHub's math renderer
+ * still creates `$...$` math from `\$` and from `&#36;` because it resolves
+ * escapes and character references before detecting math. A `$` is therefore
+ * written as the visible `\u0024` code, like a control character, so no raw
+ * dollar sign can form math. Together with the literal backslash and the
+ * covered controls, `$` is the only input whose rendered form is a visible
+ * code rather than the source character.
+ *
+ * The encoding table, the rendered-context guarantee and the bounded-expansion
+ * guarantee are documented in `docs/m18-summary-markdown.md`.
  */
 
 import type { ActionSummary, BrokenLinkResult } from './run.js';
@@ -65,11 +80,11 @@ import type { ActionSummary, BrokenLinkResult } from './run.js';
  * Maximum output expansion for one escaped value: each input UTF-16 code unit
  * produces at most this many output UTF-16 code units.
  *
- * The longest encoding is the six-code-unit `\uXXXX` form used for the covered
- * control characters, so `escapeSummaryValue(value).length <= 6 *
- * value.length` for every string, including the empty string. The bound is
- * tight: an input of only U+0000 expands by exactly this factor. There is no
- * truncation: a value is always escaped in full.
+ * The longest encodings are the six-code-unit `\uXXXX` forms used for the
+ * covered control characters and for `$`, so `escapeSummaryValue(value).length
+ * <= 6 * value.length` for every string, including the empty string. The bound
+ * is tight: an input of only U+0000 or only `$` expands by exactly this
+ * factor. There is no truncation: a value is always escaped in full.
  */
 export const SUMMARY_VALUE_MAX_EXPANSION = 6;
 
@@ -94,6 +109,8 @@ const CHARACTER_ENCODINGS = new Map<string, string>([
   ['-', '\\-'],
   ['+', '\\+'],
   [':', '\\:'],
+  ['=', '\\='],
+  ['$', '\\u0024'],
   ['\n', '\\n'],
   ['\r', '\\r'],
   ['\t', '\\t'],
@@ -109,23 +126,31 @@ const CHARACTER_ENCODINGS = new Map<string, string>([
  * pairs) or by its documented visible encoding. The result contains no raw CR,
  * LF, TAB, C0 control or DEL character, so it is one physical line.
  *
- * The escaped result is also safe after Markdown renders it: literal
- * backslash text and encoded controls remain distinguishable, GFM
- * strikethrough, the `http://`, `https://` and `www.` extended autolinks and a
- * leading list marker cannot form, and every escape except the literal
- * backslash renders back to the visible character it replaced (a literal
- * backslash renders as two, by design). GFM can still auto-link a bare email
- * address; preventing that would require changing the visible value, so it is
- * documented as a limitation rather than handled.
+ * The escaped result is also safe after Markdown renders it: literal backslash
+ * text and encoded controls remain distinguishable, GFM strikethrough, the
+ * `http://`, `https://` and `www.` extended autolinks, math, setext headings,
+ * indented code and a leading list marker cannot form, and every escape except
+ * the literal backslash and `$` renders back to the visible character it
+ * replaced. A literal backslash renders as two backslashes and `$` renders as
+ * the visible `\u0024` code, both by design. GFM can still auto-link a bare
+ * email address; preventing that would require changing the visible value, so
+ * it is documented as a limitation rather than handled.
  *
  * The empty string maps to the empty string.
  */
 export function escapeSummaryValue(value: string): string {
   const orderedMarkerIndex = orderedMarkerPunctuationIndex(value);
+  const leadingSpaces = leadingSpacesToEncode(value);
   let escaped = '';
   let index = 0;
   for (const character of value) {
-    escaped += encodeCharacter(character, value, index, orderedMarkerIndex);
+    escaped += encodeCharacter(
+      character,
+      value,
+      index,
+      orderedMarkerIndex,
+      leadingSpaces,
+    );
     index += character.length;
   }
   return escaped;
@@ -141,7 +166,12 @@ function encodeCharacter(
   value: string,
   index: number,
   orderedMarkerIndex: number,
+  leadingSpaces: number,
 ): string {
+  if (character === ' ' && index < leadingSpaces) {
+    return '&#32;';
+  }
+
   const encoding = CHARACTER_ENCODINGS.get(character);
   if (encoding !== undefined) {
     return encoding;
@@ -162,6 +192,18 @@ function encodeCharacter(
     return `\\u${codePoint.toString(16).padStart(4, '0')}`;
   }
   return character;
+}
+
+/**
+ * Number of leading spaces to write as `&#32;` entities, or zero when the
+ * value has fewer than four. Four spaces at the start of a Markdown line make
+ * an indented code block; an entity starts with `&`, so the escaped line
+ * cannot be read as indentation while the rendered text keeps its spaces.
+ */
+function leadingSpacesToEncode(value: string): number {
+  const match = /^ +/.exec(value);
+  const count = match?.[0].length ?? 0;
+  return count >= 4 ? count : 0;
 }
 
 /**

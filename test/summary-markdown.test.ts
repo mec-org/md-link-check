@@ -88,6 +88,37 @@ function decodeEntity(body: string): string | undefined {
   return NAMED_ENTITY_DECODINGS.get(body);
 }
 
+/**
+ * Splits one GFM table row on its unescaped pipes, keeping the source escapes
+ * so each cell's content can be rendered by {@link renderInlineText}. A pipe
+ * preceded by an odd number of backslashes is cell content, not a delimiter.
+ */
+function splitTableRow(row: string): string[] {
+  const cells: string[] = [];
+  let cell = '';
+  let escaped = false;
+  for (const character of row) {
+    if (escaped) {
+      cell += character;
+      escaped = false;
+      continue;
+    }
+    if (character === '\\') {
+      cell += character;
+      escaped = true;
+      continue;
+    }
+    if (character === '|') {
+      cells.push(cell);
+      cell = '';
+      continue;
+    }
+    cell += character;
+  }
+  cells.push(cell);
+  return cells;
+}
+
 describe('M18 summary-value Markdown escaping', () => {
   it('escapes Markdown structural punctuation', () => {
     expect(escapeSummaryValue('`')).toBe('\\`');
@@ -164,6 +195,51 @@ describe('M18 summary-value Markdown escaping', () => {
     expect(renderInlineText(escapeSummaryValue('- item'))).toBe('- item');
   });
 
+  it('neutralises setext, math and indented-code markers', () => {
+    expect(escapeSummaryValue('=')).toBe('\\=');
+    expect(escapeSummaryValue('===')).toBe('\\=\\=\\=');
+    expect(renderInlineText(escapeSummaryValue('==='))).toBe('===');
+
+    // GitHub resolves `\$` and `&#36;` to `$` before detecting math, so the
+    // dollar sign is represented by a visible code instead of a raw `$`.
+    expect(escapeSummaryValue('$')).toBe('\\u0024');
+    expect(escapeSummaryValue('$a$')).toBe('\\u0024a\\u0024');
+    expect(escapeSummaryValue('$$a$$')).toBe(
+      '\\u0024\\u0024a\\u0024\\u0024',
+    );
+    expect(escapeSummaryValue('$a$')).not.toContain('$');
+    expect(renderInlineText(escapeSummaryValue('$a$'))).toBe(
+      '\\u0024a\\u0024',
+    );
+
+    // Four or more leading spaces would make an indented code block; an
+    // entity keeps the spaces in the rendered text without starting with one.
+    expect(escapeSummaryValue('    indented')).toBe(
+      '&#32;&#32;&#32;&#32;indented',
+    );
+    expect(escapeSummaryValue('   three')).toBe('   three');
+    expect(renderInlineText(escapeSummaryValue('    indented'))).toBe(
+      '    indented',
+    );
+    expect(escapeSummaryValue('    indented')).not.toMatch(/^ {4}/);
+  });
+
+  it('keeps an escaped value inside one Markdown table cell', () => {
+    const value = 'a|b `code` <i> | end';
+    const escaped = escapeSummaryValue(value);
+
+    expect(escaped).toBe('a\\|b \\`code\\` &lt;i&gt; \\| end');
+    const cells = splitTableRow(`| ${escaped} | other |`).slice(1, -1);
+    expect(cells).toHaveLength(2);
+    expect(renderInlineText(cells[0]?.trim() ?? '')).toBe(value);
+
+    // A literal backslash before a pipe is content too, not a delimiter.
+    const backslashPipe = 'a\\|b';
+    expect(
+      splitTableRow(`| ${escapeSummaryValue(backslashPipe)} |`).slice(1, -1),
+    ).toHaveLength(1);
+  });
+
   it('encodes line breaks as visible text on one line', () => {
     expect(escapeSummaryValue('\n')).toBe('\\n');
     expect(escapeSummaryValue('\r')).toBe('\\r');
@@ -207,6 +283,8 @@ describe('M18 summary-value Markdown escaping', () => {
     expect(escapeSummaryValue('\t')).toBe('\\t');
     expect(escapeSummaryValue('\\u0000')).toBe('\\\\\\\\u0000');
     expect(escapeSummaryValue('\u0000')).toBe('\\u0000');
+    expect(escapeSummaryValue('\\u0024')).toBe('\\\\\\\\u0024');
+    expect(escapeSummaryValue('$')).toBe('\\u0024');
 
     // The criterion is about the rendered summary, not only the raw string:
     // four source backslashes render as two, while a control encoding renders
@@ -222,6 +300,13 @@ describe('M18 summary-value Markdown escaping', () => {
       '\\\\u0000',
     );
     expect(renderInlineText(escapeSummaryValue('\u0000'))).toBe('\\u0000');
+    expect(renderInlineText(escapeSummaryValue('\\u0024'))).toBe(
+      '\\\\u0024',
+    );
+    expect(renderInlineText(escapeSummaryValue('$'))).toBe('\\u0024');
+    expect(renderInlineText(escapeSummaryValue('\\u0024'))).not.toBe(
+      renderInlineText(escapeSummaryValue('$')),
+    );
 
     const pairs = [
       ['\\n', '\n'],
@@ -271,6 +356,8 @@ describe('M18 summary-value Markdown escaping', () => {
       '-',
       '+',
       ':',
+      '=',
+      '$',
       '\n',
       '\r',
       '\t',
@@ -286,11 +373,18 @@ describe('M18 summary-value Markdown escaping', () => {
       );
     }
 
-    // The longest encoding is the six-code-unit control form, and it is tight.
+    // The longest encodings are the six-code-unit control and `$` forms, and
+    // they are tight.
     expect(escapeSummaryValue('\u0000')).toHaveLength(6);
     expect(escapeSummaryValue('\u007f')).toHaveLength(6);
+    expect(escapeSummaryValue('$')).toHaveLength(6);
 
-    for (const value of ['www.example.com', '1. item', 'http://example.com']) {
+    for (const value of [
+      'www.example.com',
+      '1. item',
+      'http://example.com',
+      '    leading spaces',
+    ]) {
       expect(escapeSummaryValue(value).length).toBeLessThanOrEqual(
         SUMMARY_VALUE_MAX_EXPANSION * value.length,
       );
@@ -302,6 +396,10 @@ describe('M18 summary-value Markdown escaping', () => {
       SUMMARY_VALUE_MAX_EXPANSION * worstCase.length,
     );
     expect(escapeSummaryValue(worstCase)).toBe(worstCaseEscaped);
+
+    expect(escapeSummaryValue('$'.repeat(1_000))).toHaveLength(
+      SUMMARY_VALUE_MAX_EXPANSION * 1_000,
+    );
 
     const mixed = 'docs/a b|c`d*e_f[g]<h>&i#j~k-l+m:n.md\r\n'.repeat(50);
     const mixedEscaped = escapeSummaryValue(mixed);
@@ -331,12 +429,12 @@ describe('M18 summary-value Markdown escaping', () => {
   });
 
   it('renders escaped punctuation back to the visible source text', () => {
-    const value = '`|*_[]<>#~-+:&';
+    const value = '`|*_[]<>#~-+:&=';
     expect(renderInlineText(escapeSummaryValue(value))).toBe(value);
 
     expect(escapeSummaryValue('my-file.md')).toBe('my\\-file.md');
     expect(escapeSummaryValue('docs/a:b.md')).toBe('docs/a\\:b.md');
-    expect(escapeSummaryValue('1+1=2')).toBe('1\\+1=2');
+    expect(escapeSummaryValue('1+1=2')).toBe('1\\+1\\=2');
     for (const ordinary of ['my-file.md', 'docs/a:b.md', '1+1=2']) {
       expect(renderInlineText(escapeSummaryValue(ordinary))).toBe(ordinary);
     }

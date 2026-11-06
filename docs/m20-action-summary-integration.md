@@ -271,13 +271,41 @@ the same suites pass in the repository-standard CI environment: GitHub Actions
 `CI` (`.github/workflows/ci.yml`, `pull_request` trigger: `npm run typecheck`
 and `npm test` on a Linux shallow checkout) plus the repository's CodeQL
 workflow. The live check runs and a locally reproduced CI-equivalent run are
-recorded under "CI evidence" added by the documentation-only follow-up commit,
-and in the PR body.
+recorded under "CI evidence" below.
 
 Other checks: `npm run check:action` reports
 `action entrypoint is reproducible: action-dist/index.cjs`, and
 `node scripts/check-scope.mjs` reports no change under `.github/` or
 `.project/`.
+
+## CI evidence
+
+Recorded for the reviewed code head
+`4810d534645f7c15d1f14e2f9ed8ec20da90f4cf`; the documentation-only follow-up
+commit on this branch changes no code, test or bundle byte.
+
+**CI-equivalent reproduction** — the repository-standard checkout condition
+reproduced locally. The clone is one commit deep, fetches no tags and has no M14
+base commit, matching `.github/workflows/ci.yml`:
+
+```bash
+git clone --depth 1 --no-tags \
+  --branch agent/action-summary-integration-ec54ced0cb85 \
+  https://github.com/mec-org/md-link-check.git
+# HEAD=4810d534645f7c15d1f14e2f9ed8ec20da90f4cf
+# tags=0, base be1c580 unavailable
+npm ci --ignore-scripts
+npm run typecheck   # pass
+npm test            # Test Files 58 passed (58)
+                    # Tests 1329 passed | 3 skipped (1332)
+```
+
+**Live GitHub Actions checks** at `4810d53` — 4/4 success:
+
+- `test` — [CI run 42186114698 / job 127786726386](https://github.com/mec-org/md-link-check/actions/runs/42186114698/job/127786726386), pass.
+- `Analyze (actions)` — [run 42186109595 / job 127786718051](https://github.com/mec-org/md-link-check/actions/runs/42186109595/job/127786718051), pass.
+- `Analyze (javascript-typescript)` — [run 42186109595 / job 127786717946](https://github.com/mec-org/md-link-check/actions/runs/42186109595/job/127786717946), pass.
+- `CodeQL` — [run 127786928516](https://github.com/mec-org/md-link-check/runs/127786928516), pass.
 
 ## Assumptions found false or resolved
 

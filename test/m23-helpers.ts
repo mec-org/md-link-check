@@ -250,7 +250,7 @@ export function escapeSummaryValueOracle(value: string): string {
   for (const character of value) {
     if (character === ' ' && index < leadingSpaces && encodeLeadingSpaces) {
       escaped += '&#32;';
-      index += 1;
+      index += character.length;
       continue;
     }
     escaped +=
@@ -259,7 +259,7 @@ export function escapeSummaryValueOracle(value: string): string {
         : character === '.' && value.slice(Math.max(0, index - 3), index).toLowerCase() === 'www'
           ? '\\.'
           : escapeCharacterOracle(character);
-    index += 1;
+    index += character.length;
   }
   return escaped;
 }

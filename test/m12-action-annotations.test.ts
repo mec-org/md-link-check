@@ -804,9 +804,10 @@ describe('M12 action exit codes', () => {
 describe('M12 annotation emission failure', () => {
   it('annotation write failure follows the internal-error contract', async () => {
     const env: NodeJS.ProcessEnv = { ...process.env, INPUT_PATHS: '.' };
-    // The runner provides GITHUB_OUTPUT to its steps; a test child must never
-    // append to that file.
+    // The runner provides GITHUB_OUTPUT and GITHUB_STEP_SUMMARY to its steps; a
+    // test child must never append to either file.
     delete env.GITHUB_OUTPUT;
+    delete env.GITHUB_STEP_SUMMARY;
 
     const result = await runNode(join(REPO_ROOT, 'dist', 'action.js'), [], {
       cwd: M9_BROKEN_FIXTURE,

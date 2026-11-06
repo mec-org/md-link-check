@@ -1237,6 +1237,7 @@ describe('M14 failure interaction', () => {
   it('annotation write failure follows the established internal-error policy', async () => {
     const env: NodeJS.ProcessEnv = { ...process.env, INPUT_PATHS: '.' };
     delete env.GITHUB_OUTPUT;
+    delete env.GITHUB_STEP_SUMMARY;
 
     const result = await runNode(ACTION_ARTIFACT_PATH, [], {
       cwd: M9_BROKEN_FIXTURE,
@@ -1256,6 +1257,7 @@ describe('M14 failure interaction', () => {
   it('annotation write failure does not fabricate a broken-link result', async () => {
     const env: NodeJS.ProcessEnv = { ...process.env, INPUT_PATHS: '.' };
     delete env.GITHUB_OUTPUT;
+    delete env.GITHUB_STEP_SUMMARY;
 
     const result = await runNode(ACTION_ARTIFACT_PATH, [], {
       cwd: M9_BROKEN_FIXTURE,
@@ -2109,6 +2111,14 @@ describe('M14 scope and compatibility', () => {
         'test/summary-diagnostic-list.test.ts',
         'docs/m19-diagnostic-list-formatter.md',
         'test/m19-scope.test.ts',
+        'docs/m20-action-summary-integration.md',
+        'src/action-runner.ts',
+        'src/action-step-summary.ts',
+        'test/action-helpers.ts',
+        'test/action-summary-integration.test.ts',
+        'test/cli-summary-isolation.test.ts',
+        'test/m12-action-annotations.test.ts',
+        'test/m9-action-result.test.ts',
       ]);
       const permitted = new Set([
         'test/m14-exit-usage-interaction.test.ts',

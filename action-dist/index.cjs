@@ -76,6 +76,13 @@ function formatAnnotation(finding) {
 function formatAnnotations(findings) {
   return findings.map((finding) => formatAnnotation(finding));
 }
+function formatWarningCommand(message) {
+  let escaped = "";
+  for (const character of message) {
+    escaped += escapeDataCharacter(character);
+  }
+  return `::warning::${escaped}`;
+}
 function renderBounded(value, escapeCharacter, limit) {
   const atoms = [];
   let points = 0;
@@ -150,7 +157,12 @@ function formatCount(value, field) {
 // src/action-step-summary.ts
 var import_promises2 = require("node:fs/promises");
 async function appendStepSummary(destination, markdown) {
-  await (0, import_promises2.appendFile)(destination, markdown, "utf8");
+  try {
+    await (0, import_promises2.appendFile)(destination, markdown, "utf8");
+    return "appended";
+  } catch {
+    return "failed";
+  }
 }
 
 // src/summary-markdown.ts
@@ -266,6 +278,9 @@ function formatRunSummaryMarkdown(counts, diagnostics) {
   }
   return `${lines.join("\n")}
 `;
+}
+function formatUsageErrorSummaryMarkdown() {
+  return "## Results\n\n- Outcome: usage error\n- Link check: not performed\n";
 }
 
 // src/checker.ts
@@ -2556,13 +2571,19 @@ async function run(args, io2, options = {}) {
   const parsed = parseArgs(args);
   if (parsed.help) {
     io2.writeOut(HELP);
-    return { exitCode: 0, diagnostics: NO_DIAGNOSTICS, summary: null };
+    return {
+      exitCode: 0,
+      diagnostics: NO_DIAGNOSTICS,
+      summary: null,
+      outcome: "help"
+    };
   }
   if (parsed.error !== null) {
     return {
       exitCode: reportUsageError(parsed.error, parsed.json, parsed.external, io2),
       diagnostics: NO_DIAGNOSTICS,
-      summary: null
+      summary: null,
+      outcome: "usage-error"
     };
   }
   let result;
@@ -2574,13 +2595,15 @@ async function run(args, io2, options = {}) {
       return {
         exitCode: reportUsageError(error.message, parsed.json, parsed.external, io2),
         diagnostics: NO_DIAGNOSTICS,
-        summary: null
+        summary: null,
+        outcome: "usage-error"
       };
     }
     return {
       exitCode: reportInternalError(error, parsed.json, parsed.external, io2),
       diagnostics: NO_DIAGNOSTICS,
-      summary: null
+      summary: null,
+      outcome: "internal-error"
     };
   }
   const exitCode = result.diagnostics.length === 0 ? 0 : 1;
@@ -2588,14 +2611,14 @@ async function run(args, io2, options = {}) {
   const summary = actionSummary(result);
   if (parsed.json) {
     io2.writeOut(formatJson(result, exitCode));
-    return { exitCode, diagnostics, summary };
+    return { exitCode, diagnostics, summary, outcome: "checked" };
   }
   for (const diagnostic of result.diagnostics) {
     io2.writeOut(`${formatDiagnostic(diagnostic)}
 `);
   }
   io2.writeOut(formatSummary(result));
-  return { exitCode, diagnostics, summary };
+  return { exitCode, diagnostics, summary, outcome: "checked" };
 }
 function brokenLinkResults(diagnostics) {
   return Object.freeze(
@@ -2683,6 +2706,8 @@ function internalErrorDetail(error) {
 // src/action-runner.ts
 var ActionInputError = class extends Error {
 };
+var STEP_SUMMARY_UNAVAILABLE_WARNING = "GITHUB_STEP_SUMMARY is not set; no job summary was written.";
+var STEP_SUMMARY_WRITE_FAILED_WARNING = "GITHUB_STEP_SUMMARY could not be written; no job summary was written.";
 function readActionInputs(environment) {
   return {
     paths: parsePaths(environment.INPUT_PATHS),
@@ -2705,7 +2730,13 @@ async function runAction(environment, io2) {
   } catch (error) {
     if (error instanceof ActionInputError) {
       io2.writeError(formatUsageErrorText(error.message));
-      return { exitCode: 2, diagnostics: [], summary: null };
+      await writeStepSummary({ kind: "usage-error" }, environment, io2);
+      return {
+        exitCode: 2,
+        diagnostics: [],
+        summary: null,
+        outcome: "usage-error"
+      };
     }
     throw error;
   }
@@ -2713,16 +2744,39 @@ async function runAction(environment, io2) {
   emitAnnotations(result.diagnostics, io2);
   if (result.summary !== null) {
     await publishSummaryOutputs(result.summary, environment);
-    await writeStepSummary(result.summary, result.diagnostics, environment);
   }
+  await writeStepSummary(stepSummaryOutcome(result), environment, io2);
   return result;
 }
-async function writeStepSummary(summary, findings, environment) {
+function stepSummaryOutcome(result) {
+  if (result.outcome === "usage-error") {
+    return { kind: "usage-error" };
+  }
+  if (result.outcome === "checked" && result.summary !== null) {
+    return {
+      kind: "completed",
+      summary: result.summary,
+      findings: result.diagnostics
+    };
+  }
+  return { kind: "none" };
+}
+async function writeStepSummary(outcome, environment, io2) {
   const destination = environment.GITHUB_STEP_SUMMARY;
   if (destination === void 0 || destination === "") {
+    io2.writeOut(`${formatWarningCommand(STEP_SUMMARY_UNAVAILABLE_WARNING)}
+`);
     return;
   }
-  await appendStepSummary(destination, formatRunSummaryMarkdown(summary, findings));
+  if (outcome.kind === "none") {
+    return;
+  }
+  const markdown = outcome.kind === "completed" ? formatRunSummaryMarkdown(outcome.summary, outcome.findings) : formatUsageErrorSummaryMarkdown();
+  const status = await appendStepSummary(destination, markdown);
+  if (status === "failed") {
+    io2.writeOut(`${formatWarningCommand(STEP_SUMMARY_WRITE_FAILED_WARNING)}
+`);
+  }
 }
 function emitAnnotations(findings, io2) {
   for (const annotation of formatAnnotations(findings)) {

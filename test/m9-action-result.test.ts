@@ -5,6 +5,7 @@ import { buildCommandLine, runAction } from '../src/action-runner.js';
 import { formatAnnotations } from '../src/annotation.js';
 import type { CliIo, RunResult } from '../src/run.js';
 import { makeTempRoot, writeFiles } from './helpers.js';
+import { withDefaultStepSummary } from './action-helpers.js';
 import {
   captureRun,
   fixtureRelativeFindings,
@@ -33,7 +34,7 @@ async function captureAction(environment: NodeJS.ProcessEnv): Promise<CapturedAc
       stderr += text;
     },
   };
-  const result = await runAction(environment, io);
+  const result = await runAction(withDefaultStepSummary(environment), io);
   return { exitCode: result.exitCode, diagnostics: result.diagnostics, stdout, stderr };
 }
 
@@ -98,7 +99,9 @@ describe('M9 action wrapper structured results', () => {
     };
 
     const action = await runAction(
-      { INPUT_PATHS: join(M9_BROKEN_FIXTURE, 'unreadable-input.md') },
+      withDefaultStepSummary({
+        INPUT_PATHS: join(M9_BROKEN_FIXTURE, 'unreadable-input.md'),
+      }),
       io,
     );
 

@@ -4,14 +4,15 @@
  * M19 introduced this guard while the formatter was deliberately unwired: no
  * production module other than `src/summary-markdown.ts` could mention it, and
  * the committed action bundle had to stay byte-identical to the pre-summary
- * v0.3 bundle. M20 is the milestone that wires the formatter into the action,
- * so its own docstring anticipated this update.
+ * v0.3 bundle. M20 wired the formatter into the action and M21 added the
+ * usage-error summary and the summary warning, so both milestones deliberately
+ * updated this guard.
  *
- * The guard now enforces the narrow M20 integration edge directly, without git
- * history and therefore in a shallow CI checkout:
+ * The guard now enforces the narrow M20/M21 integration edge directly, without
+ * git history and therefore in a shallow CI checkout:
  *
- * - only `src/action-runner.ts` may import or mention the M19 formatter, and
- *   only it may read the `GITHUB_STEP_SUMMARY` destination;
+ * - only `src/action-runner.ts` may import or mention the M19/M21 formatters,
+ *   and only it may read the `GITHUB_STEP_SUMMARY` destination;
  * - the formatter module itself stays pure, and the one append helper stays
  *   formatter-free;
  * - the committed action bundle contains the M20 integration, so the shipped
@@ -66,11 +67,13 @@ describe('M20 action-summary integration scope', () => {
       const displayPath = relative(REPO_ROOT, path);
 
       if (path === INTEGRATION_MODULE) {
-        // The one permitted M20 edge: the action orchestration layer calls the
-        // guarded formatter and the append helper.
+        // The one permitted M20/M21 edge: the action orchestration layer calls
+        // the guarded formatters, the append helper and the warning formatter.
         expect(source, displayPath).toContain("from './summary-markdown.js'");
         expect(source, displayPath).toContain('formatRunSummaryMarkdown');
+        expect(source, displayPath).toContain('formatUsageErrorSummaryMarkdown');
         expect(source, displayPath).toContain("from './action-step-summary.js'");
+        expect(source, displayPath).toContain('formatWarningCommand');
         continue;
       }
 
@@ -106,7 +109,7 @@ describe('M20 action-summary integration scope', () => {
     expect(appendHelper).toContain('appendFile');
   });
 
-  it('ships the M20 integration in the committed action bundle', () => {
+  it('ships the M20 and M21 integrations in the committed action bundle', () => {
     const bundle = readFileSync(ACTION_BUNDLE, 'utf8');
 
     expect(bundle).toContain('formatRunSummaryMarkdown');
@@ -115,5 +118,15 @@ describe('M20 action-summary integration scope', () => {
     expect(bundle).toContain('total diagnostics');
     expect(bundle).toContain('run summary counts and findings disagree');
     expect(bundle).toContain('GITHUB_STEP_SUMMARY');
+
+    // M21: the usage snippet and the fixed, escaped summary warnings are in the
+    // shipped artifact, and the append failure no longer throws through the
+    // action's main result path.
+    expect(bundle).toContain('formatUsageErrorSummaryMarkdown');
+    expect(bundle).toContain('- Outcome: usage error');
+    expect(bundle).toContain('GITHUB_STEP_SUMMARY is not set; no job summary was written.');
+    expect(bundle).toContain('GITHUB_STEP_SUMMARY could not be written; no job summary was written.');
+    expect(bundle).toContain('::warning::');
+    expect(bundle).toContain('return "failed";');
   });
 });

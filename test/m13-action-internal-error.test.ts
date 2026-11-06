@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { runAction } from '../src/action-runner.js';
+import { withDefaultStepSummary } from './action-helpers.js';
 import type { CliIo, RunResult } from '../src/run.js';
 import { makeTempRoot, writeFiles } from './helpers.js';
 import { M9_CLEAN_FIXTURE } from './m9-helpers.js';
@@ -37,7 +38,7 @@ async function captureAction(environment: NodeJS.ProcessEnv): Promise<CapturedAc
       stderr += text;
     },
   };
-  const result = await runAction(environment, io);
+  const result = await runAction(withDefaultStepSummary(environment), io);
   return {
     exitCode: result.exitCode,
     diagnostics: result.diagnostics,

@@ -7,7 +7,7 @@
  * the action entrypoint, with a seeded summary file and assert the bytes, the
  * CLI output and the exit code are unchanged.
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { REPO_ROOT, runCli } from './action-helpers.js';
@@ -87,6 +87,40 @@ describe('M20 direct CLI summary isolation', () => {
     });
     expect(report.diagnostics).toHaveLength(1);
     expect(readFileSync(summaryPath, 'utf8')).toBe(seed);
+  });
+
+  it('direct CLI ignores absent empty and invalid summary destinations', async () => {
+    const root = makeTempRoot();
+    const fixture = join(root, 'fixture');
+    writeFiles(fixture, {
+      'README.md': '# Clean fixture\n\n[guide](docs/guide.md)\n',
+      'docs/guide.md': '# Guide\n',
+    });
+    const baseEnvironment = { XDG_CACHE_HOME: join(root, 'cache-home') };
+    const expectedStdout =
+      'Checked 2 files: 0 broken targets, 0 external links skipped.\n';
+    const invalidPath = join(root, 'missing-parent', 'step-summary.md');
+
+    for (const environment of [
+      baseEnvironment,
+      { ...baseEnvironment, GITHUB_STEP_SUMMARY: '' },
+      { ...baseEnvironment, GITHUB_STEP_SUMMARY: invalidPath },
+    ]) {
+      const result = await runCli(['--', '.'], { cwd: fixture, env: environment });
+
+      // M21 warning handling is action-only: the direct CLI never reads the
+      // variable, never writes the file, never fails on an invalid destination
+      // and never prints a workflow command.
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe(expectedStdout);
+      expect(result.stderr).toBe('');
+      expect(result.stdout).not.toContain('::warning');
+      expect(result.stdout.split('\n').some((line) => line.startsWith('::'))).toBe(
+        false,
+      );
+    }
+
+    expect(existsSync(invalidPath)).toBe(false);
   });
 
   it('direct CLI sources do not reference the action summary writer', () => {

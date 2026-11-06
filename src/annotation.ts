@@ -1,8 +1,9 @@
 /**
- * Workflow-command annotation formatting for broken-link findings.
+ * Workflow-command formatting for broken-link findings and action warnings.
  *
- * This module is pure: it consumes the M9 structured finding contract and
- * returns deterministic GitHub workflow-command strings. It performs no I/O,
+ * This module is pure: it consumes the M9 structured finding contract or one
+ * caller-supplied message and returns deterministic GitHub workflow-command
+ * strings. It performs no I/O,
  * reads no environment, inspects no filesystem path and imports no discovery,
  * parser, checking, transport, cache, scheduler or reporting module.
  *
@@ -16,8 +17,12 @@
  * line terminator, and the bounds apply to the escaped text: the source finding,
  * the CLI diagnostics and the JSON values stay unescaped and unchanged.
  *
- * M12 wires this formatter into the action wrapper (`action-runner.ts`), which
- * emits one command per finding after the CLI has written its complete output.
+ * M12 wires the finding formatter into the action wrapper (`action-runner.ts`),
+ * which emits one command per finding after the CLI has written its complete
+ * output. M21 adds {@link formatWarningCommand}, which reuses the same
+ * data-channel escaping for the action's one summary warning; the warning
+ * message never comes from findings or from printed output.
+ *
  * The CLI and the action entrypoint's direct CLI path never import this module;
  * it is an internal seam for the action's CI-facing surface, not a supported
  * library API, and callers must treat findings as read-only.
@@ -121,6 +126,26 @@ export function formatAnnotations(
   findings: readonly BrokenLinkResult[],
 ): readonly string[] {
   return findings.map((finding) => formatAnnotation(finding));
+}
+
+/**
+ * Formats one GitHub Actions warning workflow command:
+ *
+ * `::warning::<escaped-message>`
+ *
+ * The message is escaped with the established workflow-command data-channel
+ * convention, the same one annotation messages use, so `%`, CR and LF cannot
+ * break the command or inject a second one. The caller supplies one stable,
+ * short message; the returned string has no line terminator so the emitter can
+ * control the physical line boundary. A warning is not a broken-link finding
+ * and none of the annotation bounds apply to it.
+ */
+export function formatWarningCommand(message: string): string {
+  let escaped = '';
+  for (const character of message) {
+    escaped += escapeDataCharacter(character);
+  }
+  return `::warning::${escaped}`;
 }
 
 /**

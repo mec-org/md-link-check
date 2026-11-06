@@ -1,10 +1,43 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /** Repository root, resolved from this test file rather than the cwd. */
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+/** A writable step-summary destination owned by this test process. */
+let defaultSummaryRoot: string | null = null;
+
+/**
+ * Returns a writable step-summary destination that lives outside every test
+ * fixture and checkout.
+ *
+ * GitHub Actions always provides `GITHUB_STEP_SUMMARY` to a step, so the M9–M20
+ * action suites exercise their frozen printed surfaces with a usable summary
+ * destination. The M21 suite explicitly opts into the unset, empty and
+ * unwritable cases that must produce the one summary warning.
+ */
+export function defaultStepSummaryPath(): string {
+  defaultSummaryRoot ??= mkdtempSync(join(tmpdir(), 'md-link-check-step-summary-'));
+  return join(defaultSummaryRoot, 'summary.md');
+}
+
+/**
+ * Adds the default writable summary destination to an in-process action
+ * environment that does not explicitly choose one. A caller that wants the
+ * unset case passes `GITHUB_STEP_SUMMARY: undefined`, which keeps the own
+ * property and therefore suppresses the default.
+ */
+export function withDefaultStepSummary(
+  environment: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  if (Object.prototype.hasOwnProperty.call(environment, 'GITHUB_STEP_SUMMARY')) {
+    return environment;
+  }
+  return { ...environment, GITHUB_STEP_SUMMARY: defaultStepSummaryPath() };
+}
 
 export const ACTION_METADATA_PATH = join(REPO_ROOT, 'action.yml');
 export const ACTION_ARTIFACT_PATH = join(REPO_ROOT, 'action-dist', 'index.cjs');
@@ -135,12 +168,19 @@ export async function runAction(options: ActionRunOptions): Promise<ProcessResul
   // merged immediately below, with temporary paths of their own.
   delete env.GITHUB_OUTPUT;
   delete env.GITHUB_STEP_SUMMARY;
-  for (const [key, value] of Object.entries(options.env ?? {})) {
+  const explicitEnvironment = options.env ?? {};
+  for (const [key, value] of Object.entries(explicitEnvironment)) {
     if (value === undefined) {
       delete env[key];
     } else {
       env[key] = value;
     }
+  }
+  // As on a hosted runner, a summary destination is normally available. The
+  // M21 unavailable-destination tests suppress this default with an explicit
+  // own property (`GITHUB_STEP_SUMMARY: undefined` or the empty string).
+  if (!Object.prototype.hasOwnProperty.call(explicitEnvironment, 'GITHUB_STEP_SUMMARY')) {
+    env.GITHUB_STEP_SUMMARY = defaultStepSummaryPath();
   }
 
   return runNode(options.artifactPath ?? ACTION_ARTIFACT_PATH, [], {

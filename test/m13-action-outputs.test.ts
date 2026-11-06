@@ -21,6 +21,7 @@ import {
   runAction as runCommittedAction,
   runActionBuild,
   runCli,
+  withDefaultStepSummary,
 } from './action-helpers.js';
 import { makeTempRoot, writeFiles } from './helpers.js';
 import {
@@ -136,7 +137,7 @@ async function captureSourceAction(environment: NodeJS.ProcessEnv): Promise<Capt
       stderr += text;
     },
   };
-  const result = await runSourceAction(environment, io);
+  const result = await runSourceAction(withDefaultStepSummary(environment), io);
   return {
     exitCode: result.exitCode,
     diagnostics: result.diagnostics,

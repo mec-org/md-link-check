@@ -67,3 +67,31 @@ Acceptance: tests prove default action runs fetch no HTTP(S) target, external-mo
 ## M16 — v0.3 hardening, documentation and real-docs run
 Add interaction and regression coverage across several files, several findings, images, anchors and external results. Update `README.md` and `docs/` for the annotations, the outputs and the unchanged CLI output, and bring the README's release-tag statements, and the README contract tests that check them, in line with the tags that exist. Run the CLI and the action wrapper offline over the owner's `dsh-copilot` documentation from the root-owned, read-only snapshot `/opt/dsh-factory/snapshots/dsh-copilot@fc98b7b953f59f4e747d14164119770f1777e96d/`, without real-internet checks.
 Acceptance: the v0.3 definition of done in PROJECT.md holds; all tests and builds pass and `action-dist/index.cjs` is current; the offline real-docs run completes, every reported local broken link is confirmed real, and it leaves no untracked file; the milestone changes only `src/`, `test/`, `docs/`, `README.md`, `action.yml` and `action-dist/index.cjs`; CI is green on `main`; the release and tag decision goes to the owner.
+
+## M17 — Run-summary contract
+Give the action wrapper, in-process, everything the run summary needs (the three summary counts and the broken-link results in the CLI's result order) without parsing text output and without changing the CLI's human-readable or JSON surfaces. Add regression fixtures that freeze the v0.3 action output, annotations and outputs before any summary is written.
+Acceptance: tests prove the wrapper receives the counts and each broken link's file, line, target and reason in result order; the covered printed output, annotations and outputs are byte-for-byte those of v0.3; `action-dist/index.cjs` is current.
+
+## M18 — Summary values and Markdown escaping
+Add a bounded escaping function for every value placed in the summary (file names, targets, reasons), so characters that Markdown treats specially cannot change its structure, and each value keeps its meaning. It is not yet wired into the action.
+Acceptance: unit tests cover backticks, pipes, asterisks, underscores, brackets, angle brackets, leading `#`, line breaks and control characters; each value yields one escaped entry with its text intact.
+
+## M19 — Diagnostic list formatter
+Add the formatter that turns the counts and the broken-link results into the summary's Markdown: the counts, then at most the first 50 diagnostics in result order, then a line stating the total and how many are not listed when there are more. The 50 is a documented constant. It is not yet wired into the action.
+Acceptance: unit tests prove the output for zero, one, 50 and 51 or more findings, result order preserved, the not-listed count correct, and every value passed through the M18 escaping.
+
+## M20 — Action summary integration
+Append the summary from the existing action entrypoint when `GITHUB_STEP_SUMMARY` names a writable file, once per run, keeping the CLI's printed output, the annotations and the outputs unchanged. Regenerate `action-dist/index.cjs` with the existing build script; direct CLI runs write no summary.
+Acceptance: action-level tests with a temporary summary file prove one summary is appended for clean and broken fixtures, the printed output, annotations and outputs are unchanged, direct CLI tests write no summary, and `action-dist/index.cjs` is current.
+
+## M21 — Exit, usage and write-failure interaction
+Keep the established outcomes while the summary is active: a clean run exits 0, at least one broken link exits 1, a usage error exits 2, and the summary never replaces, suppresses or reinterprets the result. An unset or unwritable summary file changes nothing else and is reported once as a warning.
+Acceptance: action-level tests cover exits 0, 1 and 2 with a summary, a usage-error summary that lists no broken link, an unset variable and an unwritable file; usage and diagnostic text are unchanged; `action-dist/index.cjs` is current.
+
+## M22 — Offline and external-mode coverage
+Check the summary in both action modes, the default offline mode and `external: true`, with every external test using only a local HTTP server fixture. The summary follows the CLI's existing result classifications and counts, with no new transport policy.
+Acceptance: tests prove default runs fetch no HTTP(S) target, external-mode tests use only a local server, the summary's counts and listed diagnostics match the run in both modes, and `action-dist/index.cjs` is current.
+
+## M23 — v0.4 hardening, documentation and real-docs run
+Add interaction and regression coverage across several files, many findings (more than 50), images, anchors and external results. Update `README.md` and `docs/` for the run summary, its listing limit and its fail-safe behavior, and bring the README's release-tag statements, and the README contract tests that check them, in line with the tags that exist. Run the CLI and the action wrapper offline over the owner's `dsh-copilot` documentation from the root-owned, read-only snapshot `/opt/dsh-factory/snapshots/dsh-copilot@fc98b7b953f59f4e747d14164119770f1777e96d/`, without real-internet checks.
+Acceptance: the v0.4 definition of done in PROJECT.md holds; all tests and builds pass and `action-dist/index.cjs` is current; the offline real-docs run completes, writes a summary to a temporary file, every reported local broken link is confirmed real, and it leaves no untracked file; the milestone changes only `src/`, `test/`, `docs/`, `README.md`, `action.yml` and `action-dist/index.cjs`; CI is green on `main`; the release and tag decision goes to the owner.

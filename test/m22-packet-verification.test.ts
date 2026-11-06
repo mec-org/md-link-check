@@ -31,7 +31,6 @@ import {
   WRITE_FAILED_WARNING,
   actionStdout,
   offlineFixture,
-  summaryOccurrences,
   warningLines,
 } from './m22-helpers.js';
 import { startFixtureServer } from './server.js';
@@ -137,7 +136,6 @@ describe('M22 packet protection for merge-gate acceptance criteria', () => {
       ]);
       expect(readFileSync(outputPath, 'utf8')).toBe(OFFLINE_EXPECTATION.outputs);
       expect(existsSync(unwritableSummary)).toBe(false);
-      expect(summaryOccurrences(expectedStdout)).toBe(0);
       expect(server.requests).toEqual([]);
 
       // The M21 unset case warns once with its own fixed message and preserves

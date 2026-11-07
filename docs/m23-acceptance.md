@@ -5,9 +5,11 @@
 - Reviewed PR head: `c28d43c469a2b4277d8d9bef65a9aa243e4b25c6`.
 - Merged commit on `main`: `bd479080f2967f281f9650cf0c8476e37ef5b9c1`
   (PR #61; main CI observed green after merge).
-- Supplemental follow-up: PR #63, head
-  `67ad3ef0ed059b0806844665fef05d6852cf592d` (see
+- Supplemental follow-up: PR #63, evidence head
+  `05344eaec9c0e38f778b8f9a16c5ab59371163ed` (see
   [PR #63 supplemental evidence](#pr-63-supplemental-evidence-follow-up-after-merge)).
+  Every later commit on PR #63, including the one adding this record, changes
+  only `docs/m23-acceptance.md`.
 - Scope: `src/`, `test/`, `docs/`, `README.md`, `action.yml`,
   `action-dist/index.cjs` only.
 - Outcome: the v0.4 definition of done (PROJECT.md) is traced to evidence
@@ -343,8 +345,8 @@ adjustments described in its PR body. None of the evidence in this section
 existed at either PR #61 commit (`c28d43c4…` reviewed head, `bd479080…` merge),
 so it is recorded separately here and pinned to the head that produced it.
 
-- Evidence head: `67ad3ef0ed059b0806844665fef05d6852cf592d` (PR #63, open and
-  mergeable at evidence capture).
+- Earlier, superseded evidence head: `67ad3ef0ed059b0806844665fef05d6852cf592d`
+  (PR #63, open and mergeable at evidence capture).
 - `npm test` on that head: 65 files, 1361 tests passed, exit 0. The extra file
   and test are `test/m23-real-docs.test.ts`, which ran once because this host
   has the snapshot.
@@ -368,16 +370,17 @@ so it is recorded separately here and pinned to the head that produced it.
   `9cf05743b2451f66495f406735dfc030232632180da43a8e32c1e58d1c1477a9`),
   independently confirms both findings, asserts zero guard access, and asserts
   the snapshot is byte-identical afterwards.
-- Test-hardening head `05344eaec9c0e38f778b8f9a16c5ab59371163ed` fixes the
+- Current evidence head `05344eaec9c0e38f778b8f9a16c5ab59371163ed` fixes the
   merge-gate findings on PR #63: the C0 escape and the fingerprint separator
   are visibly constructed, and the strict local-tag provenance check is
   restored. On that head `npm test` passed 65 files/1361 tests, and the
   required checks were all success: `test` (CI), `CodeQL`,
   `Analyze (actions)`, `Analyze (javascript-typescript)` and the dynamic
   `PR #63` workflow.
-- The commit that adds this paragraph is documentation-only; it changes only
-  `docs/m23-acceptance.md`, so the results above still describe the functional
-  tree at `05344ea…`. PR #63's final head checks are reported on PR #63.
+- Every commit after `05344ea…`, including the one that adds this paragraph,
+  changes only `docs/m23-acceptance.md`, so the results above still describe
+  the functional tree at `05344ea…`. PR #63's final head checks are reported
+  on PR #63.
 
 ## Remaining owner-only decision
 

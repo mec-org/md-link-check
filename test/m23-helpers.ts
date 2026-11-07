@@ -376,6 +376,9 @@ export function summaryOccurrences(summary: string): number {
  * C0 control. File names are representable on POSIX filesystems, so the real
  * discovery and action path produces them exactly as a hostile document could.
  */
+// The fixture file name intentionally carries a raw C0 control at runtime (the
+// source spells it with a TS escape); it exercises a value a hostile document
+// could contain on a POSIX filesystem.
 export const ESCAPING_WEIRD_FILE =
   'docs/weird|line\nbreak\ttab`tick*[x]&<y>\u0001.md';
 export const ESCAPING_WEIRD_TARGET = 'missing_*|[]&<>.md';
@@ -404,9 +407,17 @@ export const ESCAPING_FINDINGS: readonly M23Finding[] = Object.freeze([
   { file: ESCAPING_WEIRD_FILE, line: 3, target: ESCAPING_WEIRD_TARGET, reason: 'target does not exist' },
 ]);
 
+/**
+ * The six visible characters backslash-u-0001 used for the fixture's C0
+ * control. Building the escape from its code points keeps the source free of
+ * a raw control byte and makes the expected bytes unambiguous.
+ */
+const C0_VISIBLE_ESCAPE = String.fromCharCode(0x5c) + 'u0001';
+
 /** The exact escaped entry for the control-character file name. */
 const ESCAPING_FILE_ENTRY =
-  '- docs/weird\\|line\\nbreak\\ttab\\`tick\\*\\[x\\]&amp;&lt;y&gt;\\u0001.md:3: ' +
+  '- docs/weird\\|line\\nbreak\\ttab\\`tick\\*\\[x\\]&amp;&lt;y&gt;' +
+  `${C0_VISIBLE_ESCAPE}.md:3: ` +
   'missing\\_\\*\\|\\[\\]&amp;&lt;&gt;.md — target does not exist';
 
 /** The exact escaped entry for the Markdown-punctuation anchor. */

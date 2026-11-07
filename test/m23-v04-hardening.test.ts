@@ -38,6 +38,7 @@ import {
   M23_EXTERNAL_COUNTS,
   M23_OFFLINE_COUNTS,
   escapingFixture,
+  escapeSummaryValueOracle,
   expectedActionStdout,
   expectedAnnotation,
   expectedOutputs,
@@ -72,8 +73,13 @@ describe('M23 v0.4 hardening', () => {
     const server = await startFixtureServer();
     const root = makeTempRoot();
     const fixture = stageHardeningFixture(root, server.url);
-    const summaryPath = join(root, 'step-summary.md');
-    const outputPath = join(root, 'github-output.txt');
+    // Each invocation writes to its own fresh destinations. The exactly-once
+    // summary claim is therefore self-evident per invocation: neither run can
+    // append to (or be truncated by) the other's file.
+    const sourceSummaryPath = join(root, 'source-step-summary.md');
+    const sourceOutputPath = join(root, 'source-github-output.txt');
+    const actionSummaryPath = join(root, 'action-step-summary.md');
+    const actionOutputPath = join(root, 'action-github-output.txt');
     const findings = offlineFindings();
 
     try {
@@ -83,8 +89,8 @@ describe('M23 v0.4 hardening', () => {
       const source = await invokeSourceAction({
         fixture,
         external: undefined,
-        summaryPath,
-        outputPath,
+        summaryPath: sourceSummaryPath,
+        outputPath: sourceOutputPath,
         cacheHome: join(root, 'source-cache'),
       });
       expect(source.result.exitCode).toBe(1);
@@ -92,22 +98,33 @@ describe('M23 v0.4 hardening', () => {
       expect(source.result.summary).toEqual(M23_OFFLINE_COUNTS);
       expect(source.result.summary?.broken).toBe(source.result.diagnostics.length);
       expect(source.result.diagnostics).toEqual(findings);
+      const sourceSummary = readFileSync(sourceSummaryPath, 'utf8');
+      expect(summaryOccurrences(sourceSummary)).toBe(1);
+      expect(sourceSummary).toBe(expectedSummary(M23_OFFLINE_COUNTS, findings));
+      expect(readFileSync(sourceOutputPath, 'utf8')).toBe(
+        expectedOutputs(M23_OFFLINE_COUNTS),
+      );
 
-      // The committed artifact is the customer-visible action path.
+      // The committed artifact is the customer-visible action path, writing to
+      // its own paths, which do not exist until this invocation.
+      expect(existsSync(actionSummaryPath)).toBe(false);
+      expect(existsSync(actionOutputPath)).toBe(false);
       const artifact = await invokeArtifact({
         fixture,
         external: undefined,
-        summaryPath,
-        outputPath,
+        summaryPath: actionSummaryPath,
+        outputPath: actionOutputPath,
         fetchLog: join(root, 'offline-fetch.log'),
         cacheHome: join(root, 'artifact-cache'),
       });
       expect(artifact.result.status).toBe(1);
       expect(artifact.result.stderr).toBe('');
-      expect(readFileSync(outputPath, 'utf8')).toBe(expectedOutputs(M23_OFFLINE_COUNTS));
+      expect(readFileSync(actionOutputPath, 'utf8')).toBe(
+        expectedOutputs(M23_OFFLINE_COUNTS),
+      );
       expect(server.requests).toEqual([]);
 
-      const summary = readFileSync(summaryPath, 'utf8');
+      const summary = readFileSync(actionSummaryPath, 'utf8');
       expect(summaryOccurrences(summary)).toBe(1);
       expect(summary).toContain(
         '- Checked: 3\n- Broken: 67\n- External skipped: 2\n',
@@ -240,30 +257,70 @@ describe('M23 v0.4 hardening', () => {
     const root = makeTempRoot();
     const fixture = join(root, 'fixture');
     writeFiles(fixture, escapingFixture());
-    const summaryPath = join(root, 'step-summary.md');
-    const outputPath = join(root, 'github-output.txt');
+    const sourceSummaryPath = join(root, 'source-step-summary.md');
+    const sourceOutputPath = join(root, 'source-github-output.txt');
+    const actionSummaryPath = join(root, 'action-step-summary.md');
+    const actionOutputPath = join(root, 'action-github-output.txt');
 
     const source = await invokeSourceAction({
       fixture,
       external: undefined,
-      summaryPath,
-      outputPath,
+      summaryPath: sourceSummaryPath,
+      outputPath: sourceOutputPath,
       cacheHome: join(root, 'source-cache'),
     });
     expect(source.result.diagnostics).toEqual(ESCAPING_FINDINGS);
+    const sourceSummary = readFileSync(sourceSummaryPath, 'utf8');
+    expect(summaryOccurrences(sourceSummary)).toBe(1);
+    expect(sourceSummary).toBe(ESCAPING_SUMMARY);
 
+    // The hard-coded expected bytes are independently oracled by
+    // `expectedSummary`, which uses the documented escaping table. Applying the
+    // oracle to the fixture proves the C0 control (rendered as the six-character
+    // escape built from code points) agrees between the hard-coded bytes and
+    // the oracle.
+    expect(
+      expectedSummary(
+        { filesChecked: 2, broken: 2, externalSkipped: 0 },
+        ESCAPING_FINDINGS,
+      ),
+    ).toBe(ESCAPING_SUMMARY);
+
+    // The same oracle applied to the control-character file name is compared
+    // with an escape built explicitly from its six visible code points
+    // (backslash, u, 0, 0, 0, 1). Neither this test nor the oracle contains a
+    // raw C0 byte.
+    const controlEscape = String.fromCharCode(0x5c) + 'u0001';
+    expect(controlEscape).toHaveLength(6);
+    expect([...controlEscape].map((character) => character.codePointAt(0))).toEqual([
+      0x5c, 0x75, 0x30, 0x30, 0x30, 0x31,
+    ]);
+    expect(controlEscape).not.toMatch(/\p{Cc}/u);
+    const weirdFileEscape = escapeSummaryValueOracle(
+      ESCAPING_FINDINGS[1]?.file ?? '',
+    );
+    expect(weirdFileEscape).toBe(
+      'docs/weird\\|line\\nbreak\\ttab\\`tick\\*\\[x\\]&amp;&lt;y&gt;' +
+        controlEscape +
+        '.md',
+    );
+    expect(weirdFileEscape).toContain(controlEscape);
+    expect(weirdFileEscape).not.toMatch(/\p{Cc}/u);
+
+    expect(existsSync(actionSummaryPath)).toBe(false);
+    expect(existsSync(actionOutputPath)).toBe(false);
     const artifact = await invokeArtifact({
       fixture,
       external: undefined,
-      summaryPath,
-      outputPath,
+      summaryPath: actionSummaryPath,
+      outputPath: actionOutputPath,
       fetchLog: join(root, 'fetch.log'),
       cacheHome: join(root, 'artifact-cache'),
     });
     expect(artifact.result.status).toBe(1);
     expect(artifact.result.stderr).toBe('');
 
-    const summary = readFileSync(summaryPath, 'utf8');
+    const summary = readFileSync(actionSummaryPath, 'utf8');
     expect(summaryOccurrences(summary)).toBe(1);
     expect(summary).toBe(ESCAPING_SUMMARY);
 
@@ -288,7 +345,7 @@ describe('M23 v0.4 hardening', () => {
     // their visible escapes, not by raw control bytes.
     expect(diagnostics[1]).toContain('\\n');
     expect(diagnostics[1]).toContain('\\t');
-    expect(diagnostics[1]).toContain('\\u0001');
+    expect(diagnostics[1]).toContain(controlEscape);
   });
 
   it('preserves offline external classification without fetching', async () => {

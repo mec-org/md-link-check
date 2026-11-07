@@ -2137,6 +2137,7 @@ describe('M14 scope and compatibility', () => {
         'test/m23-base-manifest.json',
         'test/m23-helpers.ts',
         'test/m23-readme-contract.test.ts',
+        'test/m23-real-docs.test.ts',
         'test/m23-release-tags.json',
         'test/m23-scope.test.ts',
         'test/m23-v04-hardening.test.ts',

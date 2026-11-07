@@ -2,18 +2,26 @@
 
 - Milestone: M23, “v0.4 hardening, documentation and real-docs run”
 - Authorized base: `d8b312a79866291e0550d2fbdb9d68f192e39ead` (the M22 merge)
-- Exact reviewed PR head: recorded in the pull-request body, so the PR, the
-  checks and this record name the same commit.
+- Reviewed PR head: `c28d43c469a2b4277d8d9bef65a9aa243e4b25c6`.
+- Merged commit on `main`: `bd479080f2967f281f9650cf0c8476e37ef5b9c1`
+  (PR #61; main CI observed green after merge).
+- Supplemental follow-up: PR #63, evidence head
+  `05344eaec9c0e38f778b8f9a16c5ab59371163ed` (see
+  [PR #63 supplemental evidence](#pr-63-supplemental-evidence-follow-up-after-merge)).
+  Every later commit on PR #63, including the one adding this record, changes
+  only `docs/m23-acceptance.md`.
 - Scope: `src/`, `test/`, `docs/`, `README.md`, `action.yml`,
   `action-dist/index.cjs` only.
 - Outcome: the v0.4 definition of done (PROJECT.md) is traced to evidence
-  below, except the items that can only be observed after the operator merges
-  and pending required PR checks. No release or tag was created or moved.
+  below. Required PR checks passed for the reviewed head, and main CI was
+  observed green on the merge commit. The only open item is the owner-only
+  v0.4 release/tag decision; no release or tag was created or moved.
 
 All generated evidence is stored outside both the md-link-check checkout and
 the read-only `dsh-copilot` snapshot: `/tmp/m23-v04-real-docs.ae7C41` (the
-`<evidence>` directory below). The repository contains only the deliberate M23
-changes listed under [Changed paths and scope](#changed-paths-and-scope).
+`<evidence>` directory below). For PR #61 the repository contained only
+the deliberate M23 changes listed under [Changed paths and scope](#changed-paths-and-scope);
+PR #63's supplemental changes are listed in its own section below.
 
 ## Changed paths and scope
 
@@ -115,7 +123,7 @@ table-sensitive punctuation.
 | 6. Printed output, annotations and outputs byte-for-byte v0.3; direct CLI writes no summary | Committed M16/M17 fixture and frozen expected bytes | `preserves v03 action surfaces while adding the summary`, `M20 appends one job summary without changing the frozen v0.3 surfaces`, `direct CLI ignores summary destinations and writes no summary` | Pass | — |
 | 7. Exit codes 0/1/2, CLI options, JSON fields and action inputs/outputs unchanged | Existing frozen v0.3 surfaces plus M23 clean/broken/usage runs | `exit behavior is unchanged`, `preserves v03 action surfaces while adding the summary`, M14/M16 suites | Pass: clean 0, broken 1, usage 2; no option/JSON/input/output change | — |
 | 8. No real network; loopback-only external fixtures; offline default | Existing network guard and loopback fixtures; M23 default guard run | `preserves offline external classification without fetching`, `preserves external classifications with a loopback server`, `network-guard.test.ts`, real-docs guard runs | Pass: default guard log absent; external run requests only `GET /ok` and `GET /not-found` on the test server | — |
-| 9. No v0.4 changes to package/lockfile/scripts/`.github`/`.project`/charter; bundle current; CI green on `main` | M23 scope test and bundle check; main CI cannot be claimed before merge | `limits M23 changes to authorized paths`, `keeps action-dist current`; `npm run check:action`; PR checks | Local and PR evidence pass; `action-dist/index.cjs` matches a fresh build; main CI pending | Main CI after operator merge |
+| 9. No v0.4 changes to package/lockfile/scripts/`.github`/`.project`/charter; bundle current; CI green on `main` | M23 scope test and bundle check; PR checks and post-merge main CI observed | `limits M23 changes to authorized paths`, `keeps action-dist current`; `npm run check:action`; PR #61 checks; main CI run `42238321288` on `bd47908` | Pass: `action-dist/index.cjs` matches a fresh build; PR checks and main CI success | — |
 | 10. README documents summary, limit, fail-safe; release statements match existing tags; v0.4 release/tag decision handed to owner | README updated; local tag provenance inspected; owner decision recorded | `documents the v04 run summary contract`, `states only release tags that exist`; `git tag --list` | Pass: README names `v0.2.0`/`v0.3.0` only, says no v0.4 release tag exists; owner decision explicit below | Owner release/tag decision |
 
 ## README release-tag evidence
@@ -308,7 +316,9 @@ tool false positive, and neither document was modified. Direct evidence is in
 
 ## Verification commands and results
 
-All commands were run from the repository root unless noted.
+All local commands below were run from the repository root on the PR #61 tree
+at reviewed head `c28d43c4…`; the main-CI row was observed after the merge on
+`bd479080…`.
 
 | Command | Result |
 | --- | --- |
@@ -324,15 +334,62 @@ All commands were run from the repository root unless noted.
 | Charter pins | `PROJECT.md` `ea3d2ee5…`, `ROADMAP.md` `b7c34bd3…`, unchanged |
 | Local tags | `v0.2.0` and `v0.3.0` only; v0.3.0 peels to the owner-approved M16 commit |
 | Real-docs CLI text / JSON / action | exits 1/1/1, 18 files, 2 broken, 0 skipped, zero guard entries, one action summary, snapshot unchanged |
+| PR #61 checks (head `c28d43c4`) | `test` (CI), `Analyze (actions)`, `Analyze (javascript-typescript)`, `CodeQL` — all success |
+| Main CI (merge commit `bd47908`) | `CI` run 42238321288 success; `Push on main` run 42238321278 success; `test`, `Analyze (actions)`, `Analyze (javascript-typescript)` success |
 
-## Pending evidence and owner-only decision
+## PR #63 supplemental evidence (follow-up after merge)
 
-- Required PR checks: recorded in the pull-request body for the exact reviewed
-  head. Main-branch CI is not claimed here: M23 is merged by the operator, and
-  main CI can only be observed after that merge.
+PR #63 is a separate follow-up to merged PR #61. It adds
+`test/m23-real-docs.test.ts` and the follow-up test/README/documentation
+adjustments described in its PR body. None of the evidence in this section
+existed at either PR #61 commit (`c28d43c4…` reviewed head, `bd479080…` merge),
+so it is recorded separately here and pinned to the head that produced it.
+
+- Earlier, superseded evidence head: `67ad3ef0ed059b0806844665fef05d6852cf592d`
+  (PR #63, open and mergeable at evidence capture).
+- `npm test` on that head: 65 files, 1361 tests passed, exit 0. The extra file
+  and test are `test/m23-real-docs.test.ts`, which ran once because this host
+  has the snapshot.
+- M23 suites on that head: `test/m23-v04-hardening.test.ts` 8 tests,
+  `test/m23-readme-contract.test.ts` 2 tests, `test/m23-scope.test.ts`
+  2 tests, `test/m23-real-docs.test.ts` 1 test — all pass.
+- `npm run typecheck`, `npm run check:action` and the repository scope check:
+  pass; the scope test is part of `npm test`.
+- Required checks on that head: `test` (CI) success, `Analyze (actions)`
+  success, `Analyze (javascript-typescript)` success, and the dynamic
+  `PR #63` workflow success. The separate `CodeQL` check reports
+  neutral/skipping with “1 configuration not found” for the
+  `javascript-typescript` default setup on `refs/heads/main`; this is a
+  repository code-scanning configuration state, not a code finding or a test
+  failure.
+- `test/m23-real-docs.test.ts` is snapshot-gated: it **skips when the exact
+  snapshot path is absent**, so it is replayable only on a host that has the
+  snapshot and is not proof on CI. When the snapshot is present it reproduces
+  the offline CLI text, CLI JSON and action-wrapper runs, pins the snapshot
+  content fingerprint (154 files, 18 Markdown, fingerprint
+  `9cf05743b2451f66495f406735dfc030232632180da43a8e32c1e58d1c1477a9`),
+  independently confirms both findings, asserts zero guard access, and asserts
+  the snapshot is byte-identical afterwards.
+- Current evidence head `05344eaec9c0e38f778b8f9a16c5ab59371163ed` fixes the
+  merge-gate findings on PR #63: the C0 escape and the fingerprint separator
+  are visibly constructed, and the strict local-tag provenance check is
+  restored. On that head `npm test` passed 65 files/1361 tests, and the
+  required checks were all success: `test` (CI), `CodeQL`,
+  `Analyze (actions)`, `Analyze (javascript-typescript)` and the dynamic
+  `PR #63` workflow.
+- Every commit after `05344ea…`, including the one that adds this paragraph,
+  changes only `docs/m23-acceptance.md`, so the results above still describe
+  the functional tree at `05344ea…`. PR #63's final head checks are reported
+  on PR #63.
+
+## Remaining owner-only decision
+
+- Required PR checks and main CI are observed and green: PR #61 checks passed
+  for the reviewed head, main CI passed after merge, and PR #63's supplemental
+  checks and evidence are recorded above.
 - Release and tag: **no v0.4 tag or release was created or moved**. The owner
-  decides whether and when to create one after this PR is merged; the README
-  states v0.4 is implemented but not released. Existing tags are `v0.2.0` and
+  decides whether and when to create one after this merge; the README states
+  v0.4 is implemented but not released. Existing tags are `v0.2.0` and
   `v0.3.0`.
 
 ## Issue assumptions checked
@@ -346,6 +403,7 @@ All commands were run from the repository root unless noted.
   reuses the established guard, loopback server and action harness.
 - Repository governance may reserve merge authority: true for this deployment;
   the agent did not merge, approve or enable auto-merge.
-- Main CI can be claimed only from observed post-merge evidence: true; it is
-  therefore left pending rather than inferred.
+- Main CI can be claimed only from observed post-merge evidence: true; it was
+  observed green on merge commit `bd479080f2967f281f9650cf0c8476e37ef5b9c1`
+  and is not inferred.
 - M23 authorizes no release or tag creation: true; none was created.

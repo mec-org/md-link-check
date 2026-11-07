@@ -368,11 +368,16 @@ so it is recorded separately here and pinned to the head that produced it.
   `9cf05743b2451f66495f406735dfc030232632180da43a8e32c1e58d1c1477a9`),
   independently confirms both findings, asserts zero guard access, and asserts
   the snapshot is byte-identical afterwards.
-- The test-hardening commit on PR #63 replaces the C0 escape spelling and the
-  fingerprint separator with visibly constructed values; it changes test
-  assertions and this paragraph only, and the snapshot and the
-  65-file/1361-test outcome are unchanged. The commit that first added this
-  section was documentation-only; the new heads' checks are reported on PR #63.
+- Test-hardening head `05344eaec9c0e38f778b8f9a16c5ab59371163ed` fixes the
+  merge-gate findings on PR #63: the C0 escape and the fingerprint separator
+  are visibly constructed, and the strict local-tag provenance check is
+  restored. On that head `npm test` passed 65 files/1361 tests, and the
+  required checks were all success: `test` (CI), `CodeQL`,
+  `Analyze (actions)`, `Analyze (javascript-typescript)` and the dynamic
+  `PR #63` workflow.
+- The commit that adds this paragraph is documentation-only; it changes only
+  `docs/m23-acceptance.md`, so the results above still describe the functional
+  tree at `05344ea…`. PR #63's final head checks are reported on PR #63.
 
 ## Remaining owner-only decision
 

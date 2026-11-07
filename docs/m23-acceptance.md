@@ -365,12 +365,14 @@ so it is recorded separately here and pinned to the head that produced it.
   snapshot and is not proof on CI. When the snapshot is present it reproduces
   the offline CLI text, CLI JSON and action-wrapper runs, pins the snapshot
   content fingerprint (154 files, 18 Markdown, fingerprint
-  `80e7221a2e0ae18754f8165b347b83616ae6da0c3edb1bd8ed5fb22f888e5515`),
+  `9cf05743b2451f66495f406735dfc030232632180da43a8e32c1e58d1c1477a9`),
   independently confirms both findings, asserts zero guard access, and asserts
   the snapshot is byte-identical afterwards.
-- The commit that adds this section is documentation-only; it changes only
-  `docs/m23-acceptance.md`, so the test result above still describes the
-  functional tree at `67ad3ef…`. The new head's checks are reported on PR #63.
+- The test-hardening commit on PR #63 replaces the C0 escape spelling and the
+  fingerprint separator with visibly constructed values; it changes test
+  assertions and this paragraph only, and the snapshot and the
+  65-file/1361-test outcome are unchanged. The commit that first added this
+  section was documentation-only; the new heads' checks are reported on PR #63.
 
 ## Remaining owner-only decision
 

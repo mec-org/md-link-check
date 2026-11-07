@@ -130,9 +130,10 @@ describe('M23 README v0.4 contract', () => {
     // then the recorded evidence.
     if (localTags.length > 0) {
       for (const [tag, provenance] of Object.entries(manifest.tags)) {
-        if (!localTags.includes(tag)) {
-          continue;
-        }
+        expect(
+          localTags,
+          `recorded tag ${tag} is missing from this full checkout`,
+        ).toContain(tag);
         expect(git(['rev-parse', `${tag}^{commit}`]).trim()).toBe(provenance.commit);
         expect(git(['rev-parse', tag]).trim()).toBe(provenance.tagObject);
       }

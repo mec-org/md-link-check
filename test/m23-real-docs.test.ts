@@ -33,7 +33,7 @@ const SNAPSHOT =
 
 /** Content fingerprint (paths + file SHA-256) captured from the exact snapshot. */
 const SNAPSHOT_CONTENT_FINGERPRINT =
-  '80e7221a2e0ae18754f8165b347b83616ae6da0c3edb1bd8ed5fb22f888e5515';
+  '9cf05743b2451f66495f406735dfc030232632180da43a8e32c1e58d1c1477a9';
 
 const SNAPSHOT_FILE_COUNT = 154;
 const SNAPSHOT_MARKDOWN_COUNT = 18;
@@ -94,7 +94,9 @@ interface InventoryEntry {
 function contentFingerprint(inventory: Record<string, InventoryEntry>): string {
   const lines = Object.entries(inventory)
     .filter(([, entry]) => entry.kind === 'file')
-    .map(([path, entry]) => `${path}\u0000${entry.hash ?? ''}`)
+    // A JSON pair keeps the path/hash boundary visible and unambiguous while
+    // hashing only the snapshot's content identity.
+    .map(([path, entry]) => JSON.stringify([path, entry.hash ?? '']))
     .sort();
   return createHash('sha256').update(lines.join('\n')).digest('hex');
 }

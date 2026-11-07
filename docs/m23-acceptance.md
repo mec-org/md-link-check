@@ -5,6 +5,9 @@
 - Reviewed PR head: `c28d43c469a2b4277d8d9bef65a9aa243e4b25c6`.
 - Merged commit on `main`: `bd479080f2967f281f9650cf0c8476e37ef5b9c1`
   (PR #61; main CI observed green after merge).
+- Supplemental follow-up: PR #63, head
+  `67ad3ef0ed059b0806844665fef05d6852cf592d` (see
+  [PR #63 supplemental evidence](#pr-63-supplemental-evidence-follow-up-after-merge)).
 - Scope: `src/`, `test/`, `docs/`, `README.md`, `action.yml`,
   `action-dist/index.cjs` only.
 - Outcome: the v0.4 definition of done (PROJECT.md) is traced to evidence
@@ -14,8 +17,9 @@
 
 All generated evidence is stored outside both the md-link-check checkout and
 the read-only `dsh-copilot` snapshot: `/tmp/m23-v04-real-docs.ae7C41` (the
-`<evidence>` directory below). The repository contains only the deliberate M23
-changes listed under [Changed paths and scope](#changed-paths-and-scope).
+`<evidence>` directory below). For PR #61 the repository contained only
+the deliberate M23 changes listed under [Changed paths and scope](#changed-paths-and-scope);
+PR #63's supplemental changes are listed in its own section below.
 
 ## Changed paths and scope
 
@@ -34,7 +38,6 @@ acceptance document itself was added):
 - `test/m23-base-manifest.json`
 - `test/m23-helpers.ts`
 - `test/m23-readme-contract.test.ts`
-- `test/m23-real-docs.test.ts`
 - `test/m23-release-tags.json`
 - `test/m23-scope.test.ts`
 - `test/m23-v04-hardening.test.ts`
@@ -80,12 +83,6 @@ inputs are unchanged.
 | --- | --- |
 | 10. M23 changes limited to authorized paths against the exact base | `limits M23 changes to authorized paths` |
 | 11. Committed bundle matches a fresh build | `keeps action-dist current` |
-
-### `test/m23-real-docs.test.ts` — replayable real-docs acceptance
-
-| Responsibility | Exact test name |
-| --- | --- |
-| Reproduce the offline CLI/action real-docs run, confirm both findings, prove zero guard access and an unchanged snapshot when the exact snapshot is present | `runs the CLI and action wrapper offline over the read-only snapshot` |
 
 The M23 suite deliberately reuses the committed M16/M17 v0.3 fixture and its
 frozen bytes instead of recapturing them, and uses the repository's existing
@@ -182,20 +179,10 @@ Snapshot, used exactly as specified:
 | Markdown files | 18 |
 | Mapping | `test/fixtures/m16-multifile` precedent is not used here; the exact snapshot is the working directory |
 | Pre-run inventory | 165 entries (154 files + 11 directories), SHA-256 of the canonical inventory JSON = `307be0b9f02d0c854b90cbb7033e5e441ede1f8851ee029e996314ecb1ed1562` |
-| Content identity | 154 files, 18 Markdown; fingerprint of sorted relative paths plus each file's SHA-256 = `80e7221a2e0ae18754f8165b347b83616ae6da0c3edb1bd8ed5fb22f888e5515`; pinned in `test/m23-real-docs.test.ts` |
 
 The snapshot is not a Git checkout, so no commit identity can be re-derived
 from `.git`; the exact required path name is the identity evidence, matching
 the M16 precedent. The snapshot was not copied, replaced or written to.
-
-The packet requires generated run artifacts to stay outside both repositories,
-so no captured stdout, summary, guard log or inventory is committed here. To
-make the acceptance checkable from the packet instead, the run is reproducible:
-`test/m23-real-docs.test.ts` executes the same offline CLI text, CLI JSON and
-action-wrapper runs against the exact snapshot whenever that path exists, pins
-the content fingerprint above, independently confirms every reported finding,
-and asserts the snapshot is byte-identical afterwards. On hosts without the
-snapshot the test is skipped, so CI and other checkouts are unaffected.
 
 ## Offline real-docs commands and results
 
@@ -327,7 +314,9 @@ tool false positive, and neither document was modified. Direct evidence is in
 
 ## Verification commands and results
 
-All commands were run from the repository root unless noted.
+All local commands below were run from the repository root on the PR #61 tree
+at reviewed head `c28d43c4…`; the main-CI row was observed after the merge on
+`bd479080…`.
 
 | Command | Result |
 | --- | --- |
@@ -336,8 +325,8 @@ All commands were run from the repository root unless noted.
 | `npm run build` | exit 0 |
 | `npm run build:action` ×2 | identical sha256 `3280ff18c42325543c4786ad2615a7765ad5be22cccd5b30704476896754b920` |
 | `npm run check:action` | reproducible, exit 0 |
-| `npm test` | 65 files, 1361 tests passed, exit 0 (includes the snapshot-present real-docs test on this host) |
-| M23 suites | `test/m23-v04-hardening.test.ts` 8 tests, `test/m23-readme-contract.test.ts` 2 tests, `test/m23-scope.test.ts` 2 tests, `test/m23-real-docs.test.ts` 1 test — all pass |
+| `npm test` | 64 files, 1360 tests passed, exit 0 |
+| M23 suites | `test/m23-v04-hardening.test.ts` 8 tests, `test/m23-readme-contract.test.ts` 2 tests, `test/m23-scope.test.ts` 2 tests — all pass |
 | `npm ls --omit=dev` | no runtime dependencies |
 | `node scripts/check-scope.mjs --json --base d8b312a…` | `mode: git-diff`, `violations: []` |
 | Charter pins | `PROJECT.md` `ea3d2ee5…`, `ROADMAP.md` `b7c34bd3…`, unchanged |
@@ -346,10 +335,48 @@ All commands were run from the repository root unless noted.
 | PR #61 checks (head `c28d43c4`) | `test` (CI), `Analyze (actions)`, `Analyze (javascript-typescript)`, `CodeQL` — all success |
 | Main CI (merge commit `bd47908`) | `CI` run 42238321288 success; `Push on main` run 42238321278 success; `test`, `Analyze (actions)`, `Analyze (javascript-typescript)` success |
 
+## PR #63 supplemental evidence (follow-up after merge)
+
+PR #63 is a separate follow-up to merged PR #61. It adds
+`test/m23-real-docs.test.ts` and the follow-up test/README/documentation
+adjustments described in its PR body. None of the evidence in this section
+existed at either PR #61 commit (`c28d43c4…` reviewed head, `bd479080…` merge),
+so it is recorded separately here and pinned to the head that produced it.
+
+- Evidence head: `67ad3ef0ed059b0806844665fef05d6852cf592d` (PR #63, open and
+  mergeable at evidence capture).
+- `npm test` on that head: 65 files, 1361 tests passed, exit 0. The extra file
+  and test are `test/m23-real-docs.test.ts`, which ran once because this host
+  has the snapshot.
+- M23 suites on that head: `test/m23-v04-hardening.test.ts` 8 tests,
+  `test/m23-readme-contract.test.ts` 2 tests, `test/m23-scope.test.ts`
+  2 tests, `test/m23-real-docs.test.ts` 1 test — all pass.
+- `npm run typecheck`, `npm run check:action` and the repository scope check:
+  pass; the scope test is part of `npm test`.
+- Required checks on that head: `test` (CI) success, `Analyze (actions)`
+  success, `Analyze (javascript-typescript)` success, and the dynamic
+  `PR #63` workflow success. The separate `CodeQL` check reports
+  neutral/skipping with “1 configuration not found” for the
+  `javascript-typescript` default setup on `refs/heads/main`; this is a
+  repository code-scanning configuration state, not a code finding or a test
+  failure.
+- `test/m23-real-docs.test.ts` is snapshot-gated: it **skips when the exact
+  snapshot path is absent**, so it is replayable only on a host that has the
+  snapshot and is not proof on CI. When the snapshot is present it reproduces
+  the offline CLI text, CLI JSON and action-wrapper runs, pins the snapshot
+  content fingerprint (154 files, 18 Markdown, fingerprint
+  `80e7221a2e0ae18754f8165b347b83616ae6da0c3edb1bd8ed5fb22f888e5515`),
+  independently confirms both findings, asserts zero guard access, and asserts
+  the snapshot is byte-identical afterwards.
+- The commit that adds this section is documentation-only; it changes only
+  `docs/m23-acceptance.md`, so the test result above still describes the
+  functional tree at `67ad3ef…`. The new head's checks are reported on PR #63.
+
 ## Remaining owner-only decision
 
 - Required PR checks and main CI are observed and green: PR #61 checks passed
-  for the reviewed head, and main CI passed after merge.
+  for the reviewed head, main CI passed after merge, and PR #63's supplemental
+  checks and evidence are recorded above.
 - Release and tag: **no v0.4 tag or release was created or moved**. The owner
   decides whether and when to create one after this merge; the README states
   v0.4 is implemented but not released. Existing tags are `v0.2.0` and
